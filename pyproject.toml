@@ -1,0 +1,34 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "deskpilot-automation"
+version = "0.1.0"
+description = "Linux camera gesture desktop controller — foundation for voice and AI automation"
+requires-python = ">=3.10,<3.14"
+dependencies = [
+  "PySide6>=6.7,<7",
+  "opencv-contrib-python>=4.10,<5",
+  "mediapipe>=0.10.20,<0.11",
+  "python-xlib>=0.33,<0.34; sys_platform == 'linux'",
+  "dbus-next>=0.2.3,<0.3; sys_platform == 'linux'",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8,<10", "ruff>=0.9,<1"]
+
+[project.scripts]
+deskpilot = "deskpilot.app:main"
+
+[tool.setuptools.packages.find]
+include = ["deskpilot*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 110
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I"]
