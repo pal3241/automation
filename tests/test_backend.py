@@ -1,5 +1,6 @@
 import pytest
 
+from deskpilot.backends import create_backend
 from deskpilot.backends.base import PreviewBackend
 from deskpilot.gestures import Action
 
@@ -8,6 +9,13 @@ def backend():
     b = PreviewBackend()
     b.start()
     return b
+
+
+def test_explicit_windows_backend_imports_cross_platform():
+    result = create_backend("windows")
+    assert result.name == "Windows • SendInput"
+    with pytest.raises(ValueError, match="Backend tidak dikenal"):
+        create_backend("amiga")
 
 
 def test_direct_click_moves_once_then_clicks_and_releases():

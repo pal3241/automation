@@ -1,12 +1,38 @@
-# DeskPilot — Linux Camera Automation
+# DeskPilot — Camera Automation untuk Linux & Windows
 
 Fondasi Python untuk mengontrol desktop dengan kamera dan gestur tangan. GUI menampilkan video kamera bercermin, kerangka 21 titik per tangan, label jari, identitas kiri/kanan, status gestur, dan tombol virtual. Tahap berikutnya dapat memasukkan perintah suara/AI melalui kontrak `Action` yang sama.
 
-**Tahap 1:** kamera + GUI + gestur + backend Linux. AI, mikrofon, STT, dan TTS belum diimplementasikan.
+**Tahap 1:** kamera + GUI + gestur + backend Linux/Windows. AI, mikrofon, STT, dan TTS belum diimplementasikan.
 
 ## Jalankan
 
-Python **3.10–3.13**, webcam, dan sesi desktop Linux lokal diperlukan. Python 3.12 disarankan untuk awal. Jangan menjalankan aplikasi sebagai root.
+Python **3.10–3.13** dan webcam diperlukan. Python 3.12 disarankan. Pada Linux jangan menjalankan aplikasi sebagai root.
+
+### Windows 10/11
+
+Pasang Python 3.12 64-bit dan Git. Di PowerShell:
+
+```powershell
+git clone https://github.com/pal3241/automation.git
+cd automation
+py -3.12 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install --upgrade pip
+.\.venv\Scripts\python.exe -m pip install -e .
+.\.venv\Scripts\python.exe -m deskpilot
+```
+
+Untuk memperbarui instalasi Windows:
+
+```powershell
+cd automation
+git pull --ff-only
+.\.venv\Scripts\python.exe -m pip install -e .
+.\.venv\Scripts\python.exe -m deskpilot
+```
+
+Tidak perlu memasang driver input Python tambahan: backend memakai Win32 `SendInput` melalui pustaka standar `ctypes`. Jika kamera tidak terbuka, tutup Camera/Teams/OBS atau aplikasi lain yang sedang memakai webcam, lalu coba nomor kamera lain di GUI.
+
+### Linux
 
 Untuk Fedora dengan Python sistem 3.14, gunakan Python 3.12 terpisah melalui uv (file `.python-version` proyek juga menunjuk 3.12):
 
@@ -59,7 +85,7 @@ python -m deskpilot --model /path/hand_landmarker.task
 
 1. Buka aplikasi, pilih nomor kamera dan prioritas jika dua tangan memulai gestur bersamaan.
 2. Mulai kamera. Cocokkan label KANAN/KIRI dengan tanganmu pada tampilan bercermin.
-3. Hubungkan desktop. Pada Wayland, izinkan **keyboard + pointer** dan pilih **satu monitor penuh** pada dialog portal.
+3. Hubungkan desktop. Windows langsung memakai API lokal. Pada Wayland, izinkan **keyboard + pointer** dan pilih **satu monitor penuh** pada dialog portal.
 4. Aktifkan kontrol melalui tombol GUI atau arahkan telunjuk ke tombol virtual AKTIFKAN selama 0,9 detik dengan tangan tidak mencubit.
 5. Buka tangan sekali untuk mengaktifkan pengenal gestur, lalu coba gestur di bawah.
 6. Lepaskan semua cubitan sebelum beralih ke gestur berikutnya.
@@ -88,7 +114,7 @@ Cubit telunjuk saja tetap merupakan clutch, bukan mouse-down. Untuk drag file at
 
 Backend XTest dan RemoteDesktop yang dipakai aplikasi mengirim tindakan lewat **satu mouse sistem**. Tangan pertama yang memulai gestur menguasainya sampai gestur dilepas. Jika mulai tepat bersamaan, pilihan Prioritas bersamaan menentukan pemilik. Tangan kedua tetap bisa menggerakkan kursor virtualnya, tetapi tidak mengirim klik atau merebut drag. Buka lalu cubit ulang tangan kedua untuk mengambil alih setelah tangan pertama selesai. Tidak ada klik tertunda yang diantrikan.
 
-Pada sesi Qt/X11, tersedia overlay transparan yang melewatkan klik untuk melihat dua kursor di atas desktop. Pada Wayland, overlay global itu tidak diaktifkan: lihat kedua posisi di GUI, sementara pointer sistem mengikuti tangan pemilik. Ini **bukan dua pointer OS yang dapat mengklik dua aplikasi serentak**. Mode zoom dua tangan default mati supaya tidak bertabrakan dengan gerakan dua kursor.
+Pada Windows dan sesi Qt/X11, tersedia overlay transparan yang melewatkan klik untuk melihat dua kursor di atas desktop. Pada Wayland, overlay global itu tidak diaktifkan: lihat kedua posisi di GUI, sementara pointer sistem mengikuti tangan pemilik. Ini **bukan dua pointer OS yang dapat mengklik dua aplikasi serentak**. Mode zoom dua tangan default mati supaya tidak bertabrakan dengan gerakan dua kursor.
 
 ### Gerakan lebih halus dan label tangan
 
@@ -102,16 +128,19 @@ Pada sesi Qt/X11, tersedia overlay transparan yang melewatkan klik untuk melihat
 
 Zoom memakai Ctrl+scroll pada aplikasi yang mendukungnya, bukan pembesaran seluruh layar OS. Pastikan pointer berada di konten yang diinginkan sebelum mengaktifkan zoom. Setelah zoom selesai, buka kedua tangan untuk melanjutkan.
 
-## Kompatibilitas Linux dan batasannya
+## Kompatibilitas desktop dan batasannya
 
 | Lingkungan | Jalur input | Catatan |
 | --- | --- | --- |
+| Windows 10/11 | Win32 `SendInput` + `SetWindowPos` | Pointer, klik, drag, Ctrl+scroll, desktop multi-monitor, pindah/resize jendela target |
 | X11 | python-xlib / XTest | Pointer, klik, Ctrl+scroll; pemetaan absolut mencakup root desktop (gabungan monitor) |
 | GNOME/KDE Wayland dengan RemoteDesktop + ScreenCast portal | D-Bus Notify methods | Memerlukan izin dan metadata ukuran monitor; satu monitor dipilih untuk klik absolut |
 | Wayland tanpa portal RemoteDesktop yang memadai | Preview kamera | GUI menampilkan error jelas; kontrol tidak dianggap aktif |
-| Windows / macOS | Belum tersedia | Fondasi ini khusus Linux |
+| macOS | Belum tersedia | Gunakan mode Preview; belum ada backend input macOS |
 
-**Pindah/resize bergantung pada shortcut window manager**, bukan API universal jendela. Default Super+left-drag untuk pindah; resize memakai mouse tengah saat sesi terdeteksi GNOME, atau kanan untuk desktop lain. GUI menyediakan pilihan modifier Super/Alt dan mouse resize kanan/tengah. Sesuaikan dengan shortcut desktop. Jendela maximized/fullscreen atau aplikasi dengan ukuran tetap mungkin menolak resize. Program tidak mengubah pengaturan desktop secara otomatis.
+Pada **Windows**, cubitan kelingking memilih jendela di bawah posisi kursor virtual, lalu memindahkan atau mengubah ukurannya melalui API native. Pulihkan jendela yang maximized/minimized sebelum gestur. Windows dapat menolak input atau perubahan jendela milik aplikasi yang dijalankan sebagai Administrator; jalankan DeskPilot dengan tingkat hak yang sama hanya jika benar-benar diperlukan.
+
+Pada **Linux**, pindah/resize bergantung pada shortcut window manager. Default Super+left-drag untuk pindah; resize memakai mouse tengah saat sesi terdeteksi GNOME, atau kanan untuk desktop lain. GUI menyediakan pilihan modifier Super/Alt dan mouse resize kanan/tengah. Sesuaikan dengan shortcut desktop. Jendela fullscreen atau aplikasi dengan ukuran tetap mungkin menolak resize. Program tidak mengubah pengaturan desktop secara otomatis.
 
 Pada GNOME, periksa konfigurasi `mouse-button-modifier` dan `resize-with-right-button` jika pindah/resize belum berfungsi. Pada KDE, periksa pengaturan Window Actions → Modifier key dan aksi tombol kanan. Uji dahulu dengan mouse fisik dan modifier yang dipilih.
 
@@ -132,9 +161,9 @@ Sesi desktop aktual tetap perlu diuji pada perangkat pengguna. Keberadaan kode b
 
 - `deskpilot/gestures.py`: dua state kursor, klik/drag, arbitrasi pemilik, debounce, zoom, dan dwell.
 - `deskpilot/tracking.py`: asosiasi identitas tangan dan filter adaptif.
-- `deskpilot/cursors.py`: peta dua kursor dan overlay transparan X11.
+- `deskpilot/cursors.py`: peta dua kursor dan overlay transparan X11/Windows.
 - `deskpilot/controller.py`: satu pemilik input, mailbox terbatas, pembatalan dan watchdog.
-- `deskpilot/backends/`: kontrak tindakan, preview, X11, dan Wayland portal.
+- `deskpilot/backends/`: kontrak tindakan, preview, Win32, X11, dan Wayland portal.
 - `deskpilot/camera.py`: pengunduhan model, capture kamera, dan inferensi dua tangan.
 - `deskpilot/app.py`: GUI, overlay kamera, pengaturan, arbitrasi tombol virtual.
 - `tests/`: tes transisi gestur, kepemilikan input, watchdog, portal mock, dan rendering GUI.
@@ -149,7 +178,7 @@ ruff check .
 QT_QPA_PLATFORM=offscreen pytest -q
 ```
 
-Lihat [arsitektur](docs/architecture.md) dan [checklist perangkat nyata](docs/manual-testing.md). GitHub Actions menjalankan tes pada Python 3.10, 3.12, dan 3.13; hasil CI harus diperiksa, bukan diasumsikan.
+Lihat [arsitektur](docs/architecture.md) dan [checklist perangkat nyata](docs/manual-testing.md). GitHub Actions menjalankan tes Linux pada Python 3.10, 3.12, dan 3.13, serta tes Windows pada Python 3.12; hasil CI harus diperiksa, bukan diasumsikan.
 
 ## Referensi
 
@@ -157,5 +186,6 @@ Lihat [arsitektur](docs/architecture.md) dan [checklist perangkat nyata](docs/ma
 - [XDG RemoteDesktop portal](https://flatpak.github.io/xdg-desktop-portal/docs/doc-org.freedesktop.portal.RemoteDesktop.html)
 - [XDG ScreenCast portal](https://flatpak.github.io/xdg-desktop-portal/docs/doc-org.freedesktop.portal.ScreenCast.html)
 - [Python Xlib](https://python-xlib.github.io/)
+- [Microsoft SendInput](https://learn.microsoft.com/windows/win32/api/winuser/nf-winuser-sendinput)
 
 Lisensi kode: MIT, sesuai LICENSE repo. Model dan dependensi mengikuti lisensi masing-masing.

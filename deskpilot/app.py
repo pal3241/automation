@@ -182,15 +182,15 @@ class Window(QMainWindow):
         self.camera_id.setValue(int(self.preferences.value("camera", 0)))
         form.addRow("Kamera", self.camera_id)
         self.backend_choice = QComboBox()
-        for label, value in (
-            ("Otomatis (Linux)", "auto"),
-            ("X11 / XTest", "x11"),
-            ("Wayland / Portal", "wayland"),
-            ("Preview saja", "preview"),
-        ):
+        backends = (
+            (("Otomatis (Windows)", "auto"), ("Windows / SendInput", "windows"))
+            if sys.platform == "win32"
+            else (("Otomatis (Linux)", "auto"), ("X11 / XTest", "x11"), ("Wayland / Portal", "wayland"))
+        )
+        for label, value in (*backends, ("Preview saja", "preview")):
             self.backend_choice.addItem(label, value)
         if args.preview:
-            self.backend_choice.setCurrentIndex(3)
+            self.backend_choice.setCurrentIndex(self.backend_choice.findData("preview"))
         form.addRow("Backend", self.backend_choice)
         self.hand = QComboBox()
         self.hand.addItem("Kanan", "Right")
@@ -227,7 +227,7 @@ class Window(QMainWindow):
         form.addRow("Cubit kelingking", self.pinky)
         self.zoom_mode = QCheckBox("Mode zoom dua tangan")
         form.addRow(self.zoom_mode)
-        self.overlay_toggle = QCheckBox("Kursor desktop tambahan (X11)")
+        self.overlay_toggle = QCheckBox("Kursor desktop tambahan (X11 / Windows)")
         self.overlay_toggle.setChecked(True)
         form.addRow(self.overlay_toggle)
         self.show_labels = QCheckBox("Tampilkan nama jari")
@@ -422,12 +422,17 @@ class Window(QMainWindow):
         self.cursor_map.cursors, self.cursor_map.owner = cursors, owner
         self.view.cursors, self.view.owner = cursors, owner
         self.cursor_map.update()
-        x11 = bool(
+        desktop_overlay = bool(
             self.controller
-            and self.controller.backend_name.startswith("X11")
-            and QApplication.platformName() == "xcb"
+            and (
+                self.controller.backend_name.startswith("Windows")
+                or (
+                    self.controller.backend_name.startswith("X11")
+                    and QApplication.platformName() == "xcb"
+                )
+            )
         )
-        if active and x11 and self.overlay_toggle.isChecked():
+        if active and desktop_overlay and self.overlay_toggle.isChecked():
             self.overlay.setGeometry(QApplication.primaryScreen().virtualGeometry())
             self.overlay.cursors, self.overlay.owner = cursors, owner
             self.overlay.show()

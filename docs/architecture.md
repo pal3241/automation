@@ -2,7 +2,7 @@
 
 ## Threads and ownership
 
-Qt owns widgets, camera button arbitration, and the optional X11 overlay. CameraWorker owns OpenCV, MediaPipe, and HandTracker. One latest frame is pulled by Qt; old frames are discarded. Controller owns GestureEngine and the desktop connection. It publishes immutable cursor-position snapshots for the GUI. No frame queue grows without bound.
+Qt owns widgets, camera button arbitration, and the optional X11/Windows overlay. CameraWorker owns OpenCV, MediaPipe, and HandTracker. One latest frame is pulled by Qt; old frames are discarded. Controller owns GestureEngine and the desktop connection. It publishes immutable cursor-position snapshots for the GUI. No frame queue grows without bound.
 
 Each hand has a separate cursor position, filter, debounce state, pinch hysteresis, track ID and rearm state. Only one hand owns desktop input at a time. The existing owner is processed first. Other hands may move their logical cursors but their clicks are suppressed, not queued. They must release/regrip after the owner finishes. Priority config breaks simultaneous starts only.
 
@@ -24,7 +24,9 @@ Activation is debounced 55 ms by time; release is immediate. Ratios use palm wid
 
 ## Desktop rendering and transport
 
-Logical cursors are drawn in the camera view and GUI cursor map. A transparent, non-focusable, input-transparent desktop overlay is enabled only for the X11 backend with the Qt xcb platform. Wayland uses the GUI representation and one portal pointer, with no claim of global overlays or independent multi-seat input.
+Logical cursors are drawn in the camera view and GUI cursor map. A transparent, non-focusable, input-transparent desktop overlay is available on Windows and X11. Wayland uses the GUI representation and one portal pointer, with no claim of global overlays or independent multi-seat input.
+
+The Windows backend uses `SendInput` absolute coordinates with `MOUSEEVENTF_VIRTUALDESK`, so the normalized gesture space covers the complete multi-monitor virtual desktop. Keyboard and button ownership still goes through `DesktopBackend`. Window move/resize selects the top-level window below the cursor and applies palm deltas with `SetWindowPos`; maximized/minimized targets fail closed. Win32 loading remains lazy so importing or testing the package on Linux does not access Windows DLLs.
 
 RemoteDesktop.CreateSession → SelectDevices(keyboard/pointer) → ScreenCast.SelectSources(one monitor) → Start. Requests subscribe before calls, wait cancellably, validate grants and dimensions, and close on failure. Notify input is used without EIS or root. The portal loop is pumped while idle to detect revocation. Window actions emulate the configured Super/Alt + mouse shortcut.
 

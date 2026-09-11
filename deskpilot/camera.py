@@ -1,5 +1,6 @@
 """Camera + inference worker. The GUI pulls one latest frame, avoiding signal backlog."""
 
+import sys
 import threading
 import time
 import urllib.request
@@ -70,10 +71,16 @@ class CameraWorker(threading.Thread):
                 min_hand_presence_confidence=0.7,
                 min_tracking_confidence=0.7,
             )
-            capture = cv2.VideoCapture(self.index, cv2.CAP_V4L2)
-            if not capture.isOpened():
+            apis = (
+                [cv2.CAP_DSHOW, cv2.CAP_MSMF, cv2.CAP_ANY]
+                if sys.platform == "win32"
+                else [cv2.CAP_V4L2, cv2.CAP_ANY]
+            )
+            for api in apis:
+                capture = cv2.VideoCapture(self.index, api)
+                if capture.isOpened():
+                    break
                 capture.release()
-                capture = cv2.VideoCapture(self.index)
             if not capture.isOpened():
                 raise RuntimeError(f"Kamera {self.index} tidak bisa dibuka; cek izin atau aplikasi lain")
             capture.set(cv2.CAP_PROP_FRAME_WIDTH, 640)

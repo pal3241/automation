@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "deskpilot-automation"
-version = "0.2.0"
-description = "Linux camera gesture desktop controller — foundation for voice and AI automation"
+version = "0.3.0"
+description = "Cross-platform camera gesture desktop controller — foundation for voice and AI automation"
 requires-python = ">=3.10,<3.14"
 dependencies = [
   "PySide6>=6.7,<7",

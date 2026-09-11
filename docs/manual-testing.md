@@ -1,6 +1,6 @@
 # Real-device acceptance checklist
 
-Automated tests cover logic and simulated input. Complete this checklist on actual webcam + X11 and webcam + target Wayland compositor before calling the hardware integration verified.
+Automated tests cover logic and simulated input. Complete this checklist on an actual webcam with Windows, X11, and the target Wayland compositor before calling the hardware integration verified.
 
 - [ ] Fresh venv installation and first model download; restart offline with cached model.
 - [ ] Permission denied/camera busy/unplugged: useful error and release, no UI freeze.
@@ -18,6 +18,11 @@ Automated tests cover logic and simulated input. Complete this checklist on actu
 - [ ] Wayland deny/cancel/revoke: release/close, status error, reconnect possible. Cancel connection while permission dialog is open.
 - [ ] Unsupported Wayland portal gives clear failure; Preview still works.
 - [ ] X11 monitor layout mapping documented; check a multi-monitor root with negative monitor origin.
+- [ ] Windows 10/11: DirectShow/MSMF camera fallback, clicks, drag, right-click, and Ctrl+scroll work in normal non-elevated apps.
+- [ ] Windows multi-monitor: pointer reaches every edge, including a monitor left/above the primary display and mixed DPI scaling.
+- [ ] Windows pinky move/resize targets the window below its saved cursor; maximized/minimized targets show a clear error and do not stick input.
+- [ ] Windows overlay shows both logical cursors, remains click-through, does not take focus, and follows the complete virtual desktop geometry.
+- [ ] Windows elevated application is not assumed controllable from a non-elevated DeskPilot process.
 - [ ] Track CPU/FPS and practical latency at 640x480; reduce background load if necessary.
 
 Record distro, session type, compositor version, Python/dependency versions, camera model, and observed results. Do not interpret unit-test success as this checklist being complete.
