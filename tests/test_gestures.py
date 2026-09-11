@@ -9,14 +9,14 @@ def hand(side="Right", pinch=None, dx=0, confidence=1.0):
     points[4] = (0.15, 0.4)
     for index, tip in enumerate((8, 12, 16, 20)):
         points[tip] = (0.4 + index * 0.12, 0.25)
-    if pinch:
-        points[pinch] = (0.16, 0.4)
+    for tip in (pinch,) if isinstance(pinch, int) else pinch or ():
+        points[tip] = (0.16, 0.4)
     return Hand(side, tuple((x + dx, y) for x, y in points), confidence)
 
 
-def armed():
-    engine = GestureEngine()
-    engine.update([hand()])
+def armed(**kwargs):
+    engine = GestureEngine(Settings(debounce=0, **kwargs))
+    engine.update([hand(), hand("Left", dx=-0.2)], 0)
     return engine
 
 
@@ -24,84 +24,124 @@ def kinds(actions):
     return [a.kind for a in actions]
 
 
-def test_no_movement_with_open_hand():
+def test_open_hand_motion_leaves_both_cursors_stationary():
     e = armed()
-    assert e.update([hand(dx=0.2)]) == []
+    before = e.cursors
+    assert e.update([hand(dx=0.2)], 0.03) == []
+    assert e.cursors == before
 
 
-def test_clutch_preserves_pointer_on_grab_moves_and_releases():
+def test_cursor_clutch_and_release():
     e = armed()
-    assert "move" not in kinds(e.update([hand(pinch=8)]))
-    assert "move" in kinds(e.update([hand(pinch=8, dx=0.1)]))
-    assert kinds(e.update([hand(dx=0.2)])) == ["release"]
-    assert "move" not in kinds(e.update([hand(dx=0.3)]))
+    before = e.cursors["Right"]
+    e.update([hand(pinch=8)], 0.03)
+    assert e.cursors["Right"] == before
+    assert "pointer_at" in kinds(e.update([hand(pinch=8, dx=0.1)], 0.06))
+    assert kinds(e.update([hand(dx=0.2)], 0.09)) == ["release"]
+    before = e.cursors["Right"]
+    e.update([hand(dx=0.3)], 0.12)
+    assert e.cursors["Right"] == before
 
 
-def test_middle_click_once_per_pinch_at_index_tip():
+def test_left_click_is_one_down_and_release_without_repeat():
     e = armed()
-    h = hand(pinch=12)
-    actions = e.update([h])
-    assert actions[-1].kind == "click_at"
-    assert actions[-1].values == h.points[8]
-    for _ in range(20):
-        assert "click_at" not in kinds(e.update([h]))
-    e.update([hand()])
-    e.update([hand()])
-    assert "click_at" in kinds(e.update([h]))
+    assert kinds(e.update([hand(pinch=12)], 0.03)) == ["left_down_at"]
+    assert e.update([hand(pinch=12)], 0.06) == []
+    assert kinds(e.update([hand()], 0.09)) == ["release"]
+    assert kinds(e.update([hand(pinch=12)], 0.12)) == ["left_down_at"]
 
 
-def test_initial_closed_hand_does_not_activate():
-    e = GestureEngine()
-    assert e.update([hand(pinch=12)]) == []
-
-
-def test_loss_releases_and_requires_open_hand():
+def test_drag_upgrade_keeps_same_button_down_and_no_jump():
     e = armed()
-    e.update([hand(pinch=16)])
-    assert kinds(e.update([])) == ["release"]
-    assert e.update([hand(pinch=16)]) == []
-    e.update([hand()])
-    assert "begin_window" in kinds(e.update([hand(pinch=16)]))
+    e.update([hand(pinch=12)], 0.03)
+    before = e.cursors["Right"]
+    assert e.update([hand(pinch=(8, 12))], 0.06) == []
+    assert e.cursors["Right"] == before
+    actions = e.update([hand(pinch=(8, 12), dx=0.1)], 0.09)
+    assert kinds(actions) == ["pointer_at"]
+    assert e.update([hand(pinch=12)], 0.12) == []
+    assert kinds(e.update([hand()], 0.15)) == ["release"]
 
 
-def test_wrong_hand_does_not_take_over():
+def test_simultaneous_three_finger_drag_starts_one_press():
     e = armed()
-    assert "click_at" not in kinds(e.update([hand("Left", 12)]))
+    assert kinds(e.update([hand(pinch=(8, 12))], 0.03)) == ["left_down_at"]
 
 
-def test_low_confidence_and_duplicate_handedness_release():
+def test_ring_is_right_click_once():
     e = armed()
-    assert kinds(e.update([hand(confidence=0.4)])) == ["release"]
-    assert kinds(e.update([hand(), hand()])) == ["release"]
+    assert kinds(e.update([hand(pinch=16)], 0.03)) == ["right_click_at"]
+    assert e.update([hand(pinch=16)], 0.06) == []
 
 
-def test_left_hand_configuration():
-    e = GestureEngine(Settings(dominant="Left"))
-    e.update([hand("Left")])
-    assert "click_at" in kinds(e.update([hand("Left", 12)]))
+def test_pinky_window_or_resize_configurable():
+    for mode in ("window", "resize"):
+        e = armed(pinky_action=mode)
+        assert kinds(e.update([hand(pinch=20)], 0.03)) == ["begin_" + mode]
 
 
-def test_two_hand_zoom_can_start_after_cursor_grab():
+def test_two_independent_cursors_with_locked_mouse_owner():
     e = armed()
-    e.update([hand(pinch=8), hand("Left", dx=0.3)])
-    assert e.mode == "cursor"
-    e.update([hand(pinch=8), hand("Left", pinch=8, dx=0.3)])
+    e.update([hand(pinch=8), hand("Left", pinch=8, dx=-0.2)], 0.03)
+    before = e.cursors
+    e.update([hand(pinch=8, dx=0.1), hand("Left", pinch=8, dx=-0.3)], 0.06)
+    assert e.cursors["Right"][0] > before["Right"][0]
+    assert e.cursors["Left"][0] < before["Left"][0]
+    assert e.owner == "Right"
+    e.update([hand(), hand("Left", pinch=8, dx=-0.3)], 0.09)
+    assert e.owner is None  # blocked hand must open first, never steal on owner release
+    e.update([hand(), hand("Left", dx=-0.3)], 0.12)
+    e.update([hand(), hand("Left", pinch=8, dx=-0.3)], 0.15)
+    assert e.owner == "Left"
+
+
+def test_other_hand_cannot_click_or_steal_active_drag():
+    e = armed()
+    e.update([hand(pinch=(8, 12)), hand("Left", dx=-0.2)], 0.03)
+    assert "right_click_at" not in kinds(e.update([hand(pinch=(8, 12)), hand("Left", pinch=16)], 0.06))
+    assert e.owner == "Right"
+
+
+def test_loss_and_reacquisition_require_open_hand():
+    e = armed()
+    e.update([hand(pinch=(8, 12))], 0.03)
+    assert kinds(e.update([], 0.06)) == ["release"]
+    assert e.update([hand(pinch=(8, 12))], 0.09) == []
+    e.update([hand()], 0.12)
+    assert "left_down_at" in kinds(e.update([hand(pinch=(8, 12))], 0.15))
+
+
+def test_identity_change_low_confidence_and_duplicates_release():
+    for replacement in ([replace(hand(pinch=12), track_id=9)], [hand(confidence=0.3)], [hand(), hand()]):
+        e = armed()
+        e.update([hand(pinch=12)], 0.03)
+        assert "release" in kinds(e.update(replacement, 0.06))
+        assert e.owner is None
+
+
+def test_short_noise_does_not_click():
+    e = GestureEngine(Settings(debounce=0.055))
+    e.update([hand()], 0)
+    assert e.update([hand(pinch=12)], 0.01) == []
+    assert e.update([hand()], 0.04) == []
+    e.update([hand(pinch=12)], 0.1)
+    assert kinds(e.update([hand(pinch=12)], 0.16)) == ["left_down_at"]
+    assert kinds(e.update([hand()], 0.17)) == ["release"]
+
+
+def test_fist_releases_without_right_click():
+    e = armed()
+    e.update([hand(pinch=12)], 0.03)
+    assert kinds(e.update([hand(pinch=(8, 12, 16, 20))], 0.06)) == ["release"]
+
+
+def test_zoom_is_explicit_and_finishes_with_rearm():
+    e = armed(two_hand_zoom=True)
+    e.update([hand(pinch=8), hand("Left", pinch=8, dx=-0.2)], 0.03)
     assert e.mode == "zoom"
-    actions = e.update([hand(pinch=8), hand("Left", pinch=8, dx=0.5)])
-    assert actions[0].kind == "zoom" and actions[0].values[0] > 0
-    assert "move" not in kinds(actions)
-    assert kinds(e.update([hand(pinch=8)])) == ["release"]
-    assert e.update([hand(pinch=8, dx=0.3)]) == []
-
-
-def test_pinch_hysteresis():
-    e = armed()
-    e.update([hand(pinch=8)])
-    h = hand(pinch=8)
-    points = list(h.points)
-    points[8] = (points[4][0] + 0.30 * 0.38, points[4][1])
-    e.update([replace(h, points=tuple(points))])
-    assert e.mode == "cursor"
+    assert "zoom" in kinds(e.update([hand(pinch=8, dx=0.1), hand("Left", pinch=8, dx=-0.3)], 0.06))
+    assert kinds(e.update([hand(pinch=8)], 0.09)) == ["release"]
+    assert e.update([hand(pinch=8)], 0.12) == []
 
 
 def test_dwell_fires_once_until_exit():
@@ -112,13 +152,3 @@ def test_dwell_fires_once_until_exit():
     d.update(None, 3, 0.9)
     assert not d.update("stop", 4, 0.9)[0]
     assert d.update("stop", 5, 0.9)[0]
-
-
-def test_ambiguous_fist_does_not_trigger_resize():
-    e = armed()
-    h = hand(pinch=8)
-    points = list(h.points)
-    for tip in (12, 16, 20):
-        points[tip] = points[8]
-    assert kinds(e.update([replace(h, points=tuple(points))])) == ["release"]
-    assert e.needs_open

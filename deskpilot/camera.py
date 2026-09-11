@@ -6,6 +6,7 @@ import urllib.request
 from pathlib import Path
 
 from .gestures import Hand
+from .tracking import HandTracker
 
 MODEL_URL = "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task"
 
@@ -33,7 +34,7 @@ def ensure_model(path):
 
 
 class CameraWorker(threading.Thread):
-    def __init__(self, index, model_path, consumer):
+    def __init__(self, index, model_path, consumer, swap=False):
         super().__init__(daemon=True, name="camera-tracking")
         self.index, self.model_path, self.consumer = index, model_path, consumer
         self.stop_event = threading.Event()
@@ -41,6 +42,7 @@ class CameraWorker(threading.Thread):
         self.latest = None
         self.status = "Menyiapkan model tangan…"
         self.error = ""
+        self.tracker = HandTracker(swap=swap)
 
     def stop(self):
         self.stop_event.set()
@@ -64,9 +66,9 @@ class CameraWorker(threading.Thread):
                 base_options=mp.tasks.BaseOptions(model_asset_path=str(model)),
                 running_mode=mp.tasks.vision.RunningMode.VIDEO,
                 num_hands=2,
-                min_hand_detection_confidence=0.6,
-                min_hand_presence_confidence=0.6,
-                min_tracking_confidence=0.6,
+                min_hand_detection_confidence=0.7,
+                min_hand_presence_confidence=0.7,
+                min_tracking_confidence=0.7,
             )
             capture = cv2.VideoCapture(self.index, cv2.CAP_V4L2)
             if not capture.isOpened():
@@ -100,6 +102,7 @@ class CameraWorker(threading.Thread):
                         for points, categories in zip(result.hand_landmarks, result.handedness)
                     ]
                     now = time.monotonic()
+                    hands = self.tracker.update(hands, now)
                     fps = fps * 0.8 + 0.2 / max(0.001, now - last_time)
                     last_time = now
                     self.consumer(hands)

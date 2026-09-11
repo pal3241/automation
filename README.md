@@ -8,17 +8,31 @@ Fondasi Python untuk mengontrol desktop dengan kamera dan gestur tangan. GUI men
 
 Python **3.10–3.13**, webcam, dan sesi desktop Linux lokal diperlukan. Python 3.12 disarankan untuk awal. Jangan menjalankan aplikasi sebagai root.
 
+Untuk Fedora dengan Python sistem 3.14, gunakan Python 3.12 terpisah melalui uv (file `.python-version` proyek juga menunjuk 3.12):
+
 ```bash
+# Pasang uv jika belum tersedia
+curl -LsSf https://astral.sh/uv/install.sh | sh
+source "$HOME/.local/bin/env"
+
 git clone https://github.com/pal3241/automation.git
 cd automation
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install --upgrade pip
-python -m pip install -e .
-python -m deskpilot
+uv python install 3.12
+uv venv --python 3.12 .venv312
+uv pip install --python .venv312/bin/python -e .
+.venv312/bin/python -m deskpilot
 ```
 
-Jika Python bawaan distro belum didukung dependensi MediaPipe, gunakan Python 3.12 yang dipasang terpisah untuk membuat virtual environment. Jangan mengganti Python sistem.
+Untuk memperbarui checkout yang sudah ada:
+
+```bash
+cd ~/automation
+git pull --ff-only
+uv pip install --python .venv312/bin/python -e .
+.venv312/bin/python -m deskpilot
+```
+
+Python sistem tetap digunakan oleh Fedora. Jangan menghapus batas versi Python proyek untuk memaksa instalasi 3.14.
 
 Paket sistem yang mungkin diperlukan:
 
@@ -43,7 +57,7 @@ python -m deskpilot --model /path/hand_landmarker.task
 
 ## Urutan penggunaan
 
-1. Buka aplikasi, pilih nomor kamera dan tangan kontrol kanan/kiri.
+1. Buka aplikasi, pilih nomor kamera dan prioritas jika dua tangan memulai gestur bersamaan.
 2. Mulai kamera. Cocokkan label KANAN/KIRI dengan tanganmu pada tampilan bercermin.
 3. Hubungkan desktop. Pada Wayland, izinkan **keyboard + pointer** dan pilih **satu monitor penuh** pada dialog portal.
 4. Aktifkan kontrol melalui tombol GUI atau arahkan telunjuk ke tombol virtual AKTIFKAN selama 0,9 detik dengan tangan tidak mencubit.
@@ -52,25 +66,41 @@ python -m deskpilot --model /path/hand_landmarker.task
 
 Mulai dengan `python -m deskpilot --preview` jika ingin menguji deteksi tanpa mengirim input ke desktop. Hubungkan backend Preview dan aktifkan kontrol untuk melihat perubahan status gestur.
 
-## Gestur
+## Gestur v0.2 — dua kursor
 
-Semua cubitan memakai **ibu jari + jari yang disebutkan**. Pilihan tangan kontrol mengunci kepemilikan sehingga tangan lain tidak mengambil alih kursor ketika tangan utama hilang.
+Setiap tangan memiliki **posisi kursor virtual sendiri**, warna hijau R (kanan) dan ungu L (kiri). Kedua penunjuk terlihat di atas tampilan kamera dan peta posisi layar pada GUI. Posisi awal berasal dari telunjuk saat tangan pertama kali terdeteksi; setelah itu tersimpan, tidak mengikuti tangan terbuka. Cubit telunjuk untuk membawa kursor ke target, lalu lepaskan sebelum klik. Klik memakai posisi kursor tangan itu, bukan memetakan ulang ujung jari yang sedang menekuk.
 
-| Gestur | Hasil |
+| Gestur dengan ibu jari | Hasil |
 | --- | --- |
-| Telunjuk + ibu jari, tahan dan gerakkan | Menggerakkan kursor secara relatif dari posisi saat ini; awal cubitan tidak melompatkan kursor |
-| Lepas cubitan telunjuk | Kursor berhenti; tangan bebas digerakkan untuk mengambil posisi baru |
-| Tengah + ibu jari | Klik kiri sekali tepat pada lokasi layar yang dipetakan dari ujung telunjuk; tidak perlu membawa kursor lebih dulu |
-| Manis + ibu jari, tahan dan gerakkan | Menunjuk lokasi jendela lalu menahan modifier + tombol mouse kiri untuk memindahkannya |
-| Kelingking + ibu jari, tahan dan gerakkan | Menunjuk lokasi jendela lalu menahan modifier + tombol mouse resize yang dipilih untuk mengubah ukurannya |
-| Kedua tangan mencubit telunjuk, renggangkan / dekatkan | Ctrl + scroll untuk zoom in / out pada aplikasi yang mendukungnya |
-| Telunjuk tidak mencubit berada di tombol kamera 0,9 detik | Aktifkan/jeda atau Stop, satu aktivasi sampai jari keluar dari tombol |
+| Telunjuk menyentuh ibu jari | Menggerakkan kursor tangan tersebut; lepas untuk berhenti |
+| Jari tengah menyentuh ibu jari | Menekan tombol kiri satu kali; lepas tengah untuk menyelesaikan klik |
+| Tengah tetap menyentuh ibu jari, lalu telunjuk ikut menyentuh | Drag dengan tombol kiri yang sama, tanpa klik kedua; gerakkan tangan |
+| Lepas telunjuk saat tengah masih menyentuh | Drag berhenti bergerak, tombol kiri tetap ditahan |
+| Lepas tengah / buka tangan | Lepas tombol kiri dan drop |
+| Jari manis menyentuh ibu jari | Klik kanan sekali per cubitan |
+| Kelingking menyentuh ibu jari | Pindah atau resize jendela, sesuai pilihan GUI |
+| Dua tangan mencubit telunjuk | Dua kursor bergerak sendiri; jika **Mode zoom dua tangan** dicentang, berubah menjadi Ctrl+scroll |
+| Telunjuk terbuka di tombol virtual 0,9 detik | Aktifkan/jeda/Stop, satu aktivasi per masuk area |
 
-**Klik langsung** berarti posisi ujung telunjuk pada gambar kamera dipetakan ke layar yang dipilih: kiri atas kamera = kiri atas layar. Cubit jari tengah saat telunjuk menunjuk target. Penunjuk bundar di kamera membantu membidik, sementara kursor sistem hanya dipindah pada saat klik. Ini bukan deteksi otomatis tombol aplikasi atau proyeksi tombol ke meja.
+Cubit telunjuk saja tetap merupakan clutch, bukan mouse-down. Untuk drag file atau titlebar, gunakan tengah + telunjuk + ibu jari. Jari manis sekarang khusus klik kanan. Aksi kelingking bisa dipilih **Pindah jendela** atau **Resize jendela** sebelum menghubungkan desktop.
 
-**Clutch kursor bukan mouse-down.** Cubit telunjuk hanya membawa penunjuk; tidak menyeret file. Pemindahan dan resize jendela memakai gestur khusus. Dua klik terpisah dapat menjadi double-click menurut pengaturan desktop; tidak ada gestur double-click khusus pada tahap ini.
+### Dua tangan dan mouse sistem
 
-**Zoom** menggunakan Ctrl+scroll, bukan pembesaran seluruh layar OS. Arahkan kursor ke konten aplikasi yang diinginkan sebelum zoom. Kontrol zoom dua tangan mendapat prioritas atas perpindahan kursor; setelah zoom selesai, buka kedua tangan sebelum melanjutkan.
+Backend XTest dan RemoteDesktop yang dipakai aplikasi mengirim tindakan lewat **satu mouse sistem**. Tangan pertama yang memulai gestur menguasainya sampai gestur dilepas. Jika mulai tepat bersamaan, pilihan Prioritas bersamaan menentukan pemilik. Tangan kedua tetap bisa menggerakkan kursor virtualnya, tetapi tidak mengirim klik atau merebut drag. Buka lalu cubit ulang tangan kedua untuk mengambil alih setelah tangan pertama selesai. Tidak ada klik tertunda yang diantrikan.
+
+Pada sesi Qt/X11, tersedia overlay transparan yang melewatkan klik untuk melihat dua kursor di atas desktop. Pada Wayland, overlay global itu tidak diaktifkan: lihat kedua posisi di GUI, sementara pointer sistem mengikuti tangan pemilik. Ini **bukan dua pointer OS yang dapat mengklik dua aplikasi serentak**. Mode zoom dua tangan default mati supaya tidak bertabrakan dengan gerakan dua kursor.
+
+### Gerakan lebih halus dan label tangan
+
+- Filter adaptif berbasis waktu menyaring jitter saat pelan dan merespons lebih cepat saat tangan bergerak. Posisi telapak menjadi referensi gerak agar menekuk telunjuk tidak membuat kursor melompat.
+- Respons gerakan lebih rendah = lebih halus; lebih tinggi = lebih responsif. Sensitivitas mengubah jarak perpindahan. Ubah setelah memutuskan koneksi desktop.
+- Aktivasi cubitan menunggu sekitar 55 ms dan memakai dua ambang jarak untuk menekan/melepas. Pelepasan tangan dan input yang hilang tidak menunggu debounce aktivasi.
+- Pelacakan menggunakan posisi/prediksi telapak, bukan urutan tangan yang dikembalikan model. Label dikunci setelah sedikitnya tiga frame dengan bukti klasifikasi yang cukup.
+- Kalau dua jalur terlalu ambigu (misalnya tangan saling menutupi), input dihentikan dan tangan diakuisisi ulang. Tangan yang terdeteksi kembali harus dibuka sebelum bisa mengontrol lagi.
+- Jika label **konsisten terbalik** karena sumber kamera bercermin, hentikan kamera lalu centang **Tukar label kiri/kanan kamera**. Label yang sudah terlanjur salah saat akuisisi dapat diperbaiki dengan ini atau dengan mengeluarkan tangan dari frame, lalu masuk lagi satu per satu.
+- Confidence yang ditampilkan merupakan keyakinan label saat akuisisi, bukan jaminan kualitas pose setiap frame. Identitas bisa tetap ambigu pada oklusi, pencahayaan buruk, atau tangan bersilangan; tidak ada klaim akurasi sempurna.
+
+Zoom memakai Ctrl+scroll pada aplikasi yang mendukungnya, bukan pembesaran seluruh layar OS. Pastikan pointer berada di konten yang diinginkan sebelum mengaktifkan zoom. Setelah zoom selesai, buka kedua tangan untuk melanjutkan.
 
 ## Kompatibilitas Linux dan batasannya
 
@@ -91,7 +121,7 @@ Sesi desktop aktual tetap perlu diuji pada perangkat pengguna. Keberadaan kode b
 
 - Tombol GUI Stop, tombol kamera STOP, serta Esc/Space **ketika jendela DeskPilot memiliki fokus** menjeda kontrol.
 - Esc/Space **bukan global hotkey**. Saat aplikasi lain aktif, gunakan tombol kamera STOP atau kembali ke DeskPilot memakai mouse fisik.
-- Hilangnya tangan utama atau confidence rendah segera menghasilkan release. Kamera/frame yang macet memicu watchdog sekitar 300 ms, di luar latensi transport desktop.
+- Hilangnya tangan pemilik input atau confidence rendah segera menghasilkan release. Kamera/frame yang macet memicu watchdog sekitar 300 ms, di luar latensi transport desktop.
 - Setelah kehilangan tracking, buka tangan sebelum mencubit kembali. Tidak ada kelanjutan drag otomatis.
 - Antrean hanya menyimpan frame terbaru. Pause membatalkan input yang belum dijalankan. Tidak ada antrean gerakan panjang.
 - Modifier/tombol dilepas saat pergantian gestur, jeda, error, atau penutupan normal. OS/portal yang hang atau proses yang dibunuh paksa tidak dapat dijamin menerima release; pada Wayland sesi portal ditutup saat cleanup.
@@ -100,14 +130,16 @@ Sesi desktop aktual tetap perlu diuji pada perangkat pengguna. Keberadaan kode b
 
 ## Struktur
 
-- `deskpilot/gestures.py`: data tangan, histeresis cubitan, clutch, zoom, dan dwell; tanpa dependensi GUI/OS.
+- `deskpilot/gestures.py`: dua state kursor, klik/drag, arbitrasi pemilik, debounce, zoom, dan dwell.
+- `deskpilot/tracking.py`: asosiasi identitas tangan dan filter adaptif.
+- `deskpilot/cursors.py`: peta dua kursor dan overlay transparan X11.
 - `deskpilot/controller.py`: satu pemilik input, mailbox terbatas, pembatalan dan watchdog.
 - `deskpilot/backends/`: kontrak tindakan, preview, X11, dan Wayland portal.
 - `deskpilot/camera.py`: pengunduhan model, capture kamera, dan inferensi dua tangan.
 - `deskpilot/app.py`: GUI, overlay kamera, pengaturan, arbitrasi tombol virtual.
 - `tests/`: tes transisi gestur, kepemilikan input, watchdog, portal mock, dan rendering GUI.
 
-Pengaturan kamera, tangan, dan sensitivitas disimpan melalui Qt QSettings. Untuk mengubah tangan/sensitivitas/modifier/tombol resize, putuskan lalu hubungkan kembali backend.
+Pengaturan kamera, prioritas tangan, sensitivitas, respons gerakan, dan pertukaran label disimpan melalui Qt QSettings. Untuk mengubah tangan/sensitivitas/modifier/tombol resize, putuskan lalu hubungkan kembali backend.
 
 ## Pengembangan
 

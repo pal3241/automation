@@ -5,13 +5,13 @@ Automated tests cover logic and simulated input. Complete this checklist on actu
 - [ ] Fresh venv installation and first model download; restart offline with cached model.
 - [ ] Permission denied/camera busy/unplugged: useful error and release, no UI freeze.
 - [ ] Right and left labels match real hands in mirrored camera preview; all 21 landmarks and five fingertip labels display.
-- [ ] Start with pinched hand: no action until opened. Wrong hand cannot drive pointer.
+- [ ] Start with pinched hand: no action until opened. No hand steals another hand’s active gesture.
 - [ ] Index clutch begins without jumping, tracks motion, stops at release; repositioning open hand leaves cursor stationary.
-- [ ] Middle pinch clicks pointed small target exactly once, regardless of how long pinch is held. Release/open/re-pinch clicks again.
+- [ ] Middle pinch holds left at its saved cursor; release completes one click.
 - [ ] Camera virtual Activate/Pause/Stop uses dwell once per entry, never also dispatches a desktop click.
-- [ ] Two index pinches (including staggered starts) zoom supported content both directions without moving pointer. Release cannot turn into an unexpected drag.
+- [ ] With zoom mode enabled, two index pinches (including staggered starts) zoom supported content both directions. Release cannot turn into an unexpected drag.
 - [ ] Physically confirm configured Super/Alt + left/right/middle mouse drag works in the desktop first.
-- [ ] Ring pinch moves a normal window, pinky pinch enlarges/shrinks it; release frees modifiers/buttons. Fullscreen/fixed-size window limitation is visible in docs.
+- [ ] Pinky pinch moves or resizes a normal window according to the selected mode; release frees modifiers/buttons. Fullscreen/fixed-size window limitation is visible in docs.
 - [ ] Hand loss/occlusion during move/resize releases keys; no automatic resume while still pinched.
 - [ ] Stop and app close during drag release inputs. Esc/Space checked with app focus only.
 - [ ] Wayland grant keyboard/pointer + one full monitor, test logical scaling (100%, 150%, 200%), both click corners and relative motion.
@@ -21,3 +21,15 @@ Automated tests cover logic and simulated input. Complete this checklist on actu
 - [ ] Track CPU/FPS and practical latency at 640x480; reduce background load if necessary.
 
 Record distro, session type, compositor version, Python/dependency versions, camera model, and observed results. Do not interpret unit-test success as this checklist being complete.
+
+## v0.2 dual-hand acceptance
+
+- [ ] Middle pinch presses left once; release clicks. Keep middle pinched, add index, move, remove index, then release middle: exactly one down/up and no target jump.
+- [ ] Ring pinch performs one right-click, never a window move. Pinky dropdown controls window move versus resize.
+- [ ] Both logical cursor positions move independently. Left can control without Right present. A second hand cannot click/steal while first hand drags; no delayed click after release.
+- [ ] Two-cursor camera drawing and map agree. X11 overlay passes physical clicks and does not steal focus. Wayland does not attempt global overlay.
+- [ ] Stationary hand jitter is reduced; slow precise movement remains usable; quick movement has acceptable lag at 20/30/60 FPS.
+- [ ] Detector output order changes, brief label flips, crossed hands, occlusion, disappearance, and re-entry: verify identity/rearm rather than assuming simulated tests prove camera accuracy.
+- [ ] Stop camera, toggle swap labels, restart. Verify actual physical Left/Right separately with palm facing camera.
+- [ ] Zoom toggle off allows both clutches without zoom. Toggle on gives Ctrl+scroll and requires opening both hands afterward.
+- [ ] Small display: main control buttons/Stop remain visible without scrolling sidebar.

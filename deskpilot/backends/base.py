@@ -60,7 +60,18 @@ class DesktopBackend:
             return
         if not self.ready:
             raise RuntimeError(self.error or "Backend belum siap")
-        if action.kind == "move":
+        if action.kind == "pointer_at":
+            self.absolute(*action.values)
+        elif action.kind == "left_down_at":
+            self.absolute(*action.values)
+            self.hold_button(1)
+        elif action.kind == "right_click_at":
+            self.absolute(*action.values)
+            try:
+                self.hold_button(3)
+            finally:
+                self.release()
+        elif action.kind == "move":
             self.relative(action.values[0] * self.width, action.values[1] * self.height)
         elif action.kind in ("click_at", "begin_window", "begin_resize"):
             self.absolute(*action.values)

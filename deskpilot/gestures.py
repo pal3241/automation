@@ -5,7 +5,10 @@ Coordinates are normalized to the mirrored camera image, not a continuously movi
 """
 
 import math
+import time
 from dataclasses import dataclass, field
+
+from .tracking import SmoothPoint, palm
 
 FINGERS = {4: "Ibu jari", 8: "Telunjuk", 12: "Tengah", 16: "Manis", 20: "Kelingking"}
 CONNECTIONS = tuple(
@@ -28,6 +31,7 @@ class Hand:
     points: tuple[tuple[float, float], ...]
     confidence: float = 1.0
     aspect: float = 4 / 3
+    track_id: int = 0
 
     def distance(self, a, b):
         p, q = self.points[a], self.points[b]
@@ -50,107 +54,181 @@ class Action:
 
 @dataclass
 class Settings:
-    dominant: str = "Right"
+    dominant: str = "Right"  # tie-breaker only: both hands are enabled
     pinch_on: float = 0.30
     pinch_off: float = 0.46
-    smoothing: float = 0.40
     gain: float = 1.5
+    min_cutoff: float = 1.5
+    debounce: float = 0.055
     zoom_step: float = 0.07
     min_confidence: float = 0.65
     dwell_seconds: float = 0.9
+    two_hand_zoom: bool = False
+    pinky_action: str = "window"
 
 
 @dataclass
-class GestureEngine:
-    settings: Settings = field(default_factory=Settings)
+class HandState:
+    cursor: tuple | None = None
     mode: str = "idle"
-    latched: dict = field(default_factory=dict)
-    previous: tuple | None = None
-    zoom_anchor: float | None = None
     needs_open: bool = True
+    pinches: dict = field(default_factory=dict)
+    candidate: str = "idle"
+    since: float = 0.0
+    previous: tuple | None = None
+    filter: object = None
+    track_id: int = -1
+    blocked: bool = False
+
+
+class GestureEngine:
+    def __init__(self, settings=None):
+        self.settings = settings or Settings()
+        self.states = {side: HandState() for side in ("Right", "Left")}
+        self.owner = None
+        self.mode = "idle"
+        self.zoom_anchor = None
+
+    @property
+    def cursors(self):
+        return {side: state.cursor for side, state in self.states.items() if state.cursor is not None}
+
+    def reset_hand(self, side):
+        old = self.states[side]
+        self.states[side] = HandState(cursor=old.cursor, track_id=old.track_id)
+        if self.owner == side:
+            self.owner = None
+            return [Action("release")]
+        return []
 
     def reset(self):
+        for side in self.states:
+            self.reset_hand(side)
+        self.owner = None
         self.mode = "idle"
-        self.latched.clear()
-        self.previous = None
         self.zoom_anchor = None
-        self.needs_open = True
         return [Action("release")]
 
-    def _pinches(self, hand):
-        result = {}
+    def wanted(self, hand, state):
         for tip in (8, 12, 16, 20):
-            key = (hand.side, tip)
-            threshold = self.settings.pinch_off if self.latched.get(key) else self.settings.pinch_on
-            self.latched[key] = hand.ratio(tip) < threshold
-            result[tip] = self.latched[key]
-        return result
+            threshold = self.settings.pinch_off if state.pinches.get(tip) else self.settings.pinch_on
+            state.pinches[tip] = hand.ratio(tip) < threshold
+        fingers = {tip for tip, closed in state.pinches.items() if closed}
+        return {
+            frozenset(): "idle",
+            frozenset({8}): "cursor",
+            frozenset({12}): "left",
+            frozenset({8, 12}): "drag",
+            frozenset({16}): "right",
+            frozenset({20}): self.settings.pinky_action,
+        }.get(frozenset(fingers), "invalid")
 
-    def update(self, hands):
-        # Ambiguous duplicate handedness must never transfer ownership mid-drag.
-        valid = [h for h in hands if h.confidence >= self.settings.min_confidence]
-        if len({h.side for h in valid}) != len(valid):
+    def update(self, hands, now=None):
+        now = time.monotonic() if now is None else now
+        hands = [h for h in hands if h.confidence >= self.settings.min_confidence]
+        if len({h.side for h in hands}) != len(hands):
             return self.reset()
-        primary = next((h for h in valid if h.side == self.settings.dominant), None)
-        if primary is None:
-            return self.reset()
-        pins = {h.side: self._pinches(h) for h in valid}
-        p = pins[primary.side]
-        if sum(p.values()) > 1:
-            return self.reset()
-        if self.needs_open:
-            if not any(any(v.values()) for v in pins.values()):
-                self.needs_open = False
-            return []
-        secondary = next((h for h in valid if h.side != primary.side), None)
-        zoom = secondary is not None and p[8] and pins[secondary.side][8]
-        wanted = (
-            "zoom"
-            if zoom
-            else next(
-                (
-                    name
-                    for tip, name in ((20, "resize"), (16, "window"), (12, "click"), (8, "cursor"))
-                    if p[tip]
-                ),
-                "idle",
-            )
-        )
+        observed = {h.side: h for h in hands}
         actions = []
-        if wanted != self.mode:
-            old = self.mode
-            actions.append(Action("release"))
-            self.mode = wanted
-            self.previous = primary.points[8]
-            self.zoom_anchor = None
-            # Finish a gesture before changing its meaning. Prevent click after zoom/dropout.
-            if old != "idle" and not (old == "cursor" and wanted == "zoom"):
-                self.needs_open = True
-                self.mode = "idle"
-                return actions
-            if wanted == "click":
-                actions.append(Action("click_at", primary.points[8]))
-            elif wanted in ("window", "resize"):
-                actions.append(Action("begin_" + wanted, primary.points[8]))
-        if wanted in ("cursor", "window", "resize"):
-            current = primary.points[8]
-            if self.previous is not None:
-                dx = (current[0] - self.previous[0]) * self.settings.smoothing
-                dy = (current[1] - self.previous[1]) * self.settings.smoothing
-                self.previous = (self.previous[0] + dx, self.previous[1] + dy)
-                if abs(dx) + abs(dy) > 0.00001:
-                    actions.append(Action("move", (dx * self.settings.gain, dy * self.settings.gain)))
+        for side in self.states:
+            if side not in observed:
+                actions.extend(self.reset_hand(side))
+        desired = {}
+        for side, hand in observed.items():
+            state = self.states[side]
+            if state.track_id != hand.track_id:
+                actions.extend(self.reset_hand(side))
+                state = self.states[side]
+                state.track_id = hand.track_id
+            if state.cursor is None:
+                state.cursor = tuple(max(0, min(1, p)) for p in hand.points[8])
+            raw = self.wanted(hand, state)
+            if raw == "invalid":
+                actions.extend(self.reset_hand(side))
+                continue
+            if state.needs_open:
+                if raw == "idle":
+                    state.needs_open = False
+                continue
+            if raw != state.candidate:
+                state.candidate, state.since = raw, now
+            # Releases are immediate; activation needs stable evidence in time, not frame count.
+            if raw == "idle":
+                desired[side] = raw
+            elif now - state.since >= self.settings.debounce:
+                desired[side] = raw
             else:
-                self.previous = current
-        elif wanted == "zoom":
-            distance = math.dist(primary.points[8], secondary.points[8])
+                desired[side] = state.mode
+                # Button-up on loss of middle contact is never delayed by a new candidate.
+                if state.mode in ("left", "drag") and not state.pinches[12]:
+                    desired[side] = "idle"
+        zoom = (
+            self.settings.two_hand_zoom and len(desired) == 2 and all(v == "cursor" for v in desired.values())
+        )
+        if zoom:
             if self.zoom_anchor is None:
-                self.zoom_anchor = distance
-            delta = distance - self.zoom_anchor
-            steps = int(delta / self.settings.zoom_step)
+                actions.append(Action("release"))
+                self.owner = None
+                self.zoom_anchor = math.dist(palm(observed["Right"]), palm(observed["Left"]))
+            distance = math.dist(palm(observed["Right"]), palm(observed["Left"]))
+            steps = int((distance - self.zoom_anchor) / self.settings.zoom_step)
             if steps:
                 actions.append(Action("zoom", (max(-3, min(3, steps)),)))
                 self.zoom_anchor = distance
+            self.mode = "zoom"
+            return actions
+        if self.zoom_anchor is not None:
+            return self.reset()
+        # Existing owner first. A newly arriving hand cannot steal a held click/drag.
+        order = sorted(desired, key=lambda side: (side != self.owner, side != self.settings.dominant))
+        for side in order:
+            state, hand = self.states[side], observed[side]
+            wanted, old = desired[side], state.mode
+            if wanted == "idle":
+                if self.owner == side:
+                    actions.append(Action("release"))
+                    self.owner = None
+                state.mode, state.blocked = "idle", False
+                state.previous = state.filter = None
+                continue
+            legal = (
+                old == "idle"
+                or old == wanted
+                or {old, wanted} <= {"left", "drag"}
+                or old == "cursor"
+                and wanted in ("left", "drag")
+            )
+            if not legal:
+                actions.extend(self.reset_hand(side))
+                continue
+            entering = old != wanted
+            if old == "idle":
+                state.blocked = self.owner is not None and self.owner != side
+                if not state.blocked:
+                    self.owner = side
+            state.mode = wanted
+            owns = self.owner == side and not state.blocked
+            if entering:
+                state.filter = SmoothPoint(self.settings.min_cutoff)
+                state.previous = state.filter.update(palm(hand), now)
+                if owns:
+                    if wanted in ("left", "drag") and old not in ("left", "drag"):
+                        actions.append(Action("left_down_at", state.cursor))
+                    elif wanted == "right":
+                        actions.append(Action("right_click_at", state.cursor))
+                    elif wanted in ("window", "resize"):
+                        actions.append(Action("begin_" + wanted, state.cursor))
+                    elif wanted == "cursor":
+                        actions.append(Action("pointer_at", state.cursor))
+            if wanted in ("cursor", "drag", "window", "resize"):
+                point = state.filter.update(palm(hand), now)
+                if math.dist(point, state.previous) >= 0.0007:
+                    delta = tuple((p - q) * self.settings.gain for p, q in zip(point, state.previous))
+                    state.cursor = tuple(max(0, min(1, p + d)) for p, d in zip(state.cursor, delta))
+                    state.previous = point
+                    if owns:
+                        actions.append(Action("pointer_at", state.cursor))
+        self.mode = " / ".join(f"{s}: {v.mode}" for s, v in self.states.items() if v.mode != "idle") or "idle"
         return actions
 
 

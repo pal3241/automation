@@ -27,6 +27,7 @@ from PySide6.QtWidgets import (
 
 from .camera import CameraWorker
 from .controller import Controller
+from .cursors import CursorMap, DesktopCursors, draw_cursors
 from .gestures import CONNECTIONS, FINGERS, Dwell, Settings
 
 STYLE = """
@@ -58,6 +59,8 @@ class CameraView(QWidget):
         self.labels = True
         self.dwell_target = None
         self.progress = 0.0
+        self.cursors = {}
+        self.owner = None
 
     @staticmethod
     def buttons():
@@ -102,6 +105,10 @@ class CameraView(QWidget):
             p.setBrush(Qt.NoBrush)
             p.setPen(QPen(color, 3))
             p.drawEllipse(point(hand.points[8]), 13, 13)
+        p.save()
+        p.translate(area.x(), area.y())
+        draw_cursors(p, self.cursors, self.owner, width, height)
+        p.restore()
         for name, normalized in self.buttons().items():
             r = QRectF(
                 area.x() + normalized.x() * width,
@@ -138,6 +145,8 @@ class Window(QMainWindow):
         self.controller = None
         self.last_seen = 0
         self.dwell = Dwell()
+        self.button_hand = None
+        self.overlay = DesktopCursors()
         self.preferences = QSettings("DeskPilot", "Automation")
         self.setWindowTitle("DeskPilot — Camera Control / Tahap 1")
         self.resize(1160, 800)
@@ -152,6 +161,8 @@ class Window(QMainWindow):
         )
         subtitle.setObjectName("muted")
         outer.addWidget(subtitle)
+        controls = QHBoxLayout()
+        outer.addLayout(controls)
         row = QHBoxLayout()
         outer.addLayout(row, 1)
         self.view = CameraView()
@@ -185,7 +196,10 @@ class Window(QMainWindow):
         self.hand.addItem("Kanan", "Right")
         self.hand.addItem("Kiri", "Left")
         self.hand.setCurrentIndex(int(self.preferences.value("hand", 0)))
-        form.addRow("Tangan kontrol", self.hand)
+        form.addRow("Prioritas bersamaan", self.hand)
+        self.swap_hands = QCheckBox("Tukar label kiri/kanan kamera")
+        self.swap_hands.setChecked(self.preferences.value("swap", False, type=bool))
+        form.addRow(self.swap_hands)
         self.modifier = QComboBox()
         self.modifier.addItem("Super", "Super_L")
         self.modifier.addItem("Alt", "Alt_L")
@@ -201,32 +215,58 @@ class Window(QMainWindow):
         self.gain.setSingleStep(0.1)
         self.gain.setValue(float(self.preferences.value("gain", 1.5)))
         form.addRow("Sensitivitas", self.gain)
+        self.smoothness = QDoubleSpinBox()
+        self.smoothness.setRange(0.5, 5.0)
+        self.smoothness.setSingleStep(0.25)
+        self.smoothness.setValue(float(self.preferences.value("cutoff", 1.5)))
+        self.smoothness.setToolTip("Lebih rendah = lebih halus; lebih tinggi = lebih responsif")
+        form.addRow("Respons gerakan", self.smoothness)
+        self.pinky = QComboBox()
+        self.pinky.addItem("Pindah jendela", "window")
+        self.pinky.addItem("Resize jendela", "resize")
+        form.addRow("Cubit kelingking", self.pinky)
+        self.zoom_mode = QCheckBox("Mode zoom dua tangan")
+        form.addRow(self.zoom_mode)
+        self.overlay_toggle = QCheckBox("Kursor desktop tambahan (X11)")
+        self.overlay_toggle.setChecked(True)
+        form.addRow(self.overlay_toggle)
         self.show_labels = QCheckBox("Tampilkan nama jari")
         self.show_labels.setChecked(True)
         form.addRow(self.show_labels)
         side.addWidget(config)
         self.connect_button = QPushButton("Hubungkan desktop")
         self.connect_button.clicked.connect(self.connect_desktop)
-        side.addWidget(self.connect_button)
+        controls.addWidget(self.connect_button)
         self.camera_button = QPushButton("Mulai kamera")
         self.camera_button.clicked.connect(self.toggle_camera)
-        side.addWidget(self.camera_button)
+        controls.addWidget(self.camera_button)
         self.arm_button = QPushButton("Aktifkan kontrol")
         self.arm_button.setObjectName("start")
         self.arm_button.clicked.connect(self.toggle_arm)
-        side.addWidget(self.arm_button)
+        controls.addWidget(self.arm_button)
         stop = QPushButton("STOP  ·  Esc / Space saat app aktif")
         stop.setObjectName("stop")
         stop.clicked.connect(self.pause)
-        side.addWidget(stop)
+        controls.addWidget(stop)
+        cursor_group = QGroupBox("DUA KURSOR • POSISI LAYAR")
+        cursor_layout = QVBoxLayout(cursor_group)
+        self.cursor_map = CursorMap()
+        cursor_layout.addWidget(self.cursor_map)
+        caption = QLabel(
+            "R hijau • L ungu. Satu tangan menguasai mouse\nsampai gestur dilepas. Posisi lainnya tetap disimpan."
+        )
+        caption.setWordWrap(True)
+        cursor_layout.addWidget(caption)
+        side.addWidget(cursor_group)
         guide = QGroupBox("GESTUR")
         layout = QVBoxLayout(guide)
         label = QLabel(
             "Ibu jari + telunjuk → bawa kursor\n"
-            "Ibu jari + tengah → klik di arah telunjuk\n"
-            "Ibu jari + manis → pindah jendela\n"
-            "Ibu jari + kelingking → resize jendela\n"
-            "Dua cubitan telunjuk → zoom\n\n"
+            "Ibu jari + tengah → klik kiri saat dilepas\n"
+            "Tambah telunjuk saat ditahan → drag\n"
+            "Ibu jari + manis → klik kanan\n"
+            "Ibu jari + kelingking → aksi pilihan\n"
+            "Dua cubitan → dua kursor / mode zoom\n\n"
             "Lepaskan semua cubitan antar gestur.\n"
             "Arahkan telunjuk ke tombol kamera\n"
             "selama 0,9 detik untuk menekannya.\n\n"
@@ -256,7 +296,13 @@ class Window(QMainWindow):
             self.pause()
             self.controller.stop()
             return
-        settings = Settings(dominant=self.hand.currentData(), gain=self.gain.value())
+        settings = Settings(
+            dominant=self.hand.currentData(),
+            gain=self.gain.value(),
+            min_cutoff=self.smoothness.value(),
+            two_hand_zoom=self.zoom_mode.isChecked(),
+            pinky_action=self.pinky.currentData(),
+        )
         self.controller = Controller(
             self.backend_choice.currentData(),
             self.modifier.currentData(),
@@ -271,7 +317,9 @@ class Window(QMainWindow):
             self.pause()
             self.camera.stop()
         else:
-            self.camera = CameraWorker(self.camera_id.value(), self.args.model, self.on_hands)
+            self.camera = CameraWorker(
+                self.camera_id.value(), self.args.model, self.on_hands, swap=self.swap_hands.isChecked()
+            )
             self.camera.start()
 
     def on_hands(self, hands):
@@ -303,17 +351,22 @@ class Window(QMainWindow):
             h, w, _ = frame.shape
             self.view.frame = QImage(frame.data, w, h, frame.strides[0], QImage.Format_RGB888).copy()
             self.view.hands, self.view.fps = hands, fps
-            primary = next(
-                (h for h in hands if h.side == self.hand.currentData() and h.confidence >= 0.65), None
-            )
             target = None
-            if primary:
-                tip = QPointF(*primary.points[8])
-                # UI buttons only accept an unpinched hand, avoiding clutch/button conflicts.
-                if all(primary.ratio(i) >= 0.46 for i in (8, 12, 16, 20)):
+            button_hand = None
+            for candidate in sorted(hands, key=lambda h: h.side != self.hand.currentData()):
+                if candidate.confidence < 0.65:
+                    continue
+                if all(candidate.ratio(i) >= 0.46 for i in (8, 12, 16, 20)):
+                    tip = QPointF(*candidate.points[8])
                     target = next(
                         (name for name, rect in self.view.buttons().items() if rect.contains(tip)), None
                     )
+                    if target:
+                        button_hand = candidate.track_id, candidate.side
+                        break
+            if button_hand != self.button_hand:
+                self.dwell = Dwell()
+                self.button_hand = button_hand
             fired, progress = self.dwell.update(target, now, 0.9)
             self.view.dwell_target, self.view.progress = target, progress
             if fired:
@@ -351,9 +404,36 @@ class Window(QMainWindow):
         )
         self.connect_button.setEnabled(True)
         self.camera_button.setText("Hentikan kamera" if camera_alive else "Mulai kamera")
-        for widget in (self.hand, self.gain, self.modifier, self.resize_mouse, self.backend_choice):
+        for widget in (
+            self.hand,
+            self.gain,
+            self.modifier,
+            self.resize_mouse,
+            self.backend_choice,
+            self.smoothness,
+            self.pinky,
+            self.zoom_mode,
+        ):
             widget.setEnabled(not controller_alive)
         self.camera_id.setEnabled(not camera_alive)
+        self.swap_hands.setEnabled(not camera_alive)
+        cursors = dict(self.controller.cursors) if self.controller else {}
+        owner = self.controller.owner if active else None
+        self.cursor_map.cursors, self.cursor_map.owner = cursors, owner
+        self.view.cursors, self.view.owner = cursors, owner
+        self.cursor_map.update()
+        x11 = bool(
+            self.controller
+            and self.controller.backend_name.startswith("X11")
+            and QApplication.platformName() == "xcb"
+        )
+        if active and x11 and self.overlay_toggle.isChecked():
+            self.overlay.setGeometry(QApplication.primaryScreen().virtualGeometry())
+            self.overlay.cursors, self.overlay.owner = cursors, owner
+            self.overlay.show()
+            self.overlay.update()
+        else:
+            self.overlay.hide()
         self.status.setText(
             (self.camera.status if self.camera else "Kamera belum aktif")
             + "  |  "
@@ -363,6 +443,7 @@ class Window(QMainWindow):
 
     def closeEvent(self, event):
         self.pause()
+        self.overlay.hide()
         if self.camera:
             self.camera.stop()
         if self.controller:
@@ -376,8 +457,11 @@ class Window(QMainWindow):
         self.preferences.setValue("camera", self.camera_id.value())
         self.preferences.setValue("hand", self.hand.currentIndex())
         self.preferences.setValue("gain", self.gain.value())
+        self.preferences.setValue("cutoff", self.smoothness.value())
+        self.preferences.setValue("swap", self.swap_hands.isChecked())
         if self.camera:
             self.camera.join(timeout=0.5)
+        self.overlay.close()
         event.accept()
 
 

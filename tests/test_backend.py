@@ -61,3 +61,15 @@ def test_zoom_and_unknown_action():
     assert not b.held_keys
     with pytest.raises(ValueError):
         b.execute(Action("shell", ("anything",)))
+
+
+def test_drag_and_right_click_transport_events():
+    b = backend()
+    b.execute(Action("left_down_at", (0.4, 0.3)))
+    b.execute(Action("pointer_at", (0.5, 0.4)))
+    assert b.held_buttons == {1}
+    assert b.events.count(("button", 1, True)) == 1
+    b.execute(Action("release"))
+    b.execute(Action("right_click_at", (0.6, 0.5)))
+    assert b.events[-3:] == [("absolute", 0.6, 0.5), ("button", 3, True), ("button", 3, False)]
+    assert not b.held_buttons

@@ -24,6 +24,9 @@ class Controller(threading.Thread):
         self.mode = "idle"
         self.error = ""
         self.last_frame = 0.0
+        self.cursors = {}
+        self.owner = None
+        self.backend_name = ""
 
     def arm(self, enabled):
         with self.lock:
@@ -56,6 +59,7 @@ class Controller(threading.Thread):
             backend.start()
             self.ready = True
             self.status = backend.name
+            self.backend_name = backend.name
             while not self.stopping.is_set():
                 self.wake.wait(0.02)
                 self.wake.clear()
@@ -70,12 +74,15 @@ class Controller(threading.Thread):
                     for action in engine.reset():
                         backend.execute(action)
                     self.mode = "idle"
+                    self.owner = None
                     seen_generation = generation
                 if not enabled or packet is None or time.monotonic() - packet[2] > 0.20:
                     continue
                 if packet[0] != generation:
                     continue
-                actions = engine.update(packet[1])
+                actions = engine.update(packet[1], packet[2])
+                self.cursors = engine.cursors
+                self.owner = engine.owner
                 self.mode = engine.mode
                 for action in actions:
                     # Check cancellation before every side effect; never hold UI lock during D-Bus IO.
