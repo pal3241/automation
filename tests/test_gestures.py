@@ -80,6 +80,49 @@ def test_pinky_window_or_resize_configurable():
         assert kinds(e.update([hand(pinch=20)], 0.03)) == ["begin_" + mode]
 
 
+def test_two_hand_pinch_resizes_outward_and_inward_without_double_press():
+    for independent in (False, True):
+        e = armed(independent=independent)
+        start = e.update([hand(pinch=20), hand("Left", pinch=20, dx=-0.2)], 0.03)
+        assert kinds(start)[-1] == "begin_resize"
+        assert e.mode == "resize dua tangan"
+        assert start[-1].side == ("Right" if independent else None)
+        outward = e.update([hand(pinch=20, dx=0.1), hand("Left", pinch=20, dx=-0.3)], 0.06)
+        assert kinds(outward) == ["pointer_at"]
+        assert outward[0].values[0] > start[-1].values[0]
+        inward = e.update([hand(pinch=20, dx=-0.05), hand("Left", pinch=20, dx=-0.15)], 0.09)
+        assert kinds(inward) == ["pointer_at"]
+        assert inward[0].values[0] < outward[0].values[0]
+        assert kinds(e.update([hand(), hand("Left", pinch=20, dx=-0.15)], 0.12))[-1] == "release"
+        assert e.update([hand(pinch=20), hand("Left", pinch=20, dx=-0.2)], 0.15) == []
+
+
+def test_pair_requires_both_hands_in_same_view():
+    e = armed()
+    different = replace(hand("Left", pinch=20), camera_id=1)
+    assert "begin_resize" not in kinds(e.update([hand(pinch=20), different], 0.03))
+    e.update([hand(), replace(hand("Left"), camera_id=1)], 0.06)
+    assert "begin_resize" in kinds(e.update([hand(pinch=20), hand("Left", pinch=20)], 0.09))
+    assert "release" in kinds(e.update([hand(pinch=20), replace(hand("Left", pinch=20), camera_id=1)], 0.12))
+
+
+def test_fingertip_mode_grabs_window_at_tip_and_releases_on_open():
+    e = armed(fingertip_window=True)
+    first = hand(pinch=8)
+    actions = e.update([first], 0.03)
+    assert kinds(actions) == ["begin_window"]
+    assert actions[0].values == first.points[8]
+    actions = e.update([hand(pinch=8, dx=0.1)], 0.06)
+    assert kinds(actions) == ["pointer_at"]
+    assert actions[0].values[0] > first.points[8][0]
+    assert kinds(e.update([hand()], 0.09)) == ["release"]
+
+
+def test_fingertip_mode_does_not_start_unknown_combination():
+    e = armed(fingertip_window=True)
+    assert "begin_window" not in kinds(e.update([hand(pinch=(8, 12))], 0.03))
+
+
 def test_two_independent_cursors_with_locked_mouse_owner():
     e = armed()
     e.update([hand(pinch=8), hand("Left", pinch=8, dx=-0.2)], 0.03)

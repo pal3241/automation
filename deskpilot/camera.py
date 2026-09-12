@@ -10,27 +10,29 @@ from .gestures import Hand
 from .tracking import HandTracker
 
 MODEL_URL = "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task"
+_model_lock = threading.Lock()
 
 
 def ensure_model(path):
     path = Path(path).expanduser()
-    if path.is_file():
-        return path
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_suffix(".download")
-    try:
-        with urllib.request.urlopen(MODEL_URL, timeout=30) as response, temporary.open("wb") as output:
-            total = 0
-            while chunk := response.read(1024 * 256):
-                total += len(chunk)
-                if total > 32 * 1024 * 1024:
-                    raise RuntimeError("Ukuran model melebihi batas 32 MB")
-                output.write(chunk)
-        if total < 1024:
-            raise RuntimeError("Unduhan model tidak lengkap")
-        temporary.replace(path)
-    finally:
-        temporary.unlink(missing_ok=True)
+    with _model_lock:
+        if path.is_file():
+            return path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = path.with_suffix(".download")
+        try:
+            with urllib.request.urlopen(MODEL_URL, timeout=30) as response, temporary.open("wb") as output:
+                total = 0
+                while chunk := response.read(1024 * 256):
+                    total += len(chunk)
+                    if total > 32 * 1024 * 1024:
+                        raise RuntimeError("Ukuran model melebihi batas 32 MB")
+                    output.write(chunk)
+            if total < 1024:
+                raise RuntimeError("Unduhan model tidak lengkap")
+            temporary.replace(path)
+        finally:
+            temporary.unlink(missing_ok=True)
     return path
 
 

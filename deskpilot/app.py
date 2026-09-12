@@ -14,13 +14,14 @@ from PySide6.QtWidgets import (
     QComboBox,
     QDoubleSpinBox,
     QFormLayout,
+    QGridLayout,
     QGroupBox,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QMainWindow,
     QPushButton,
     QScrollArea,
-    QSpinBox,
     QVBoxLayout,
     QWidget,
 )
@@ -29,6 +30,7 @@ from .camera import CameraWorker
 from .controller import Controller
 from .cursors import CursorMap, DesktopCursors, draw_cursors
 from .gestures import CONNECTIONS, FINGERS, Dwell, Settings
+from .multicamera import MultiCameraFusion, parse_camera_ids
 
 STYLE = """
 QWidget { background: #10151f; color: #e4edf8; font-family: 'DejaVu Sans'; font-size: 13px; }
@@ -61,6 +63,8 @@ class CameraView(QWidget):
         self.progress = 0.0
         self.cursors = {}
         self.owner = None
+        self.camera_id = None
+        self.buttons_enabled = True
 
     @staticmethod
     def buttons():
@@ -109,7 +113,7 @@ class CameraView(QWidget):
         p.translate(area.x(), area.y())
         draw_cursors(p, self.cursors, self.owner, width, height)
         p.restore()
-        for name, normalized in self.buttons().items():
+        for name, normalized in self.buttons().items() if self.buttons_enabled else ():
             r = QRectF(
                 area.x() + normalized.x() * width,
                 area.y() + normalized.y() * height,
@@ -132,7 +136,7 @@ class CameraView(QWidget):
         p.drawText(
             QRectF(area.x() + 12, area.bottom() - 35, width - 24, 35),
             Qt.AlignVCenter,
-            f"{self.fps:.0f} FPS  •  {len(self.hands)} tangan  •  {self.mode.upper()}  •  Kamera dicerminkan",
+            f"Kamera {self.camera_id}  •  {self.fps:.0f} FPS  •  {len(self.hands)} tangan  •  {self.mode.upper()}",
         )
         p.end()
 
@@ -142,6 +146,12 @@ class Window(QMainWindow):
         super().__init__()
         self.args = args
         self.camera = None
+        self.cameras = {}
+        self.views = {}
+        self.packets = {}
+        self.fusion = None
+        self.camera_error = ""
+        self.closing_at = None
         self.controller = None
         self.last_seen = 0
         self.dwell = Dwell()
@@ -165,8 +175,16 @@ class Window(QMainWindow):
         outer.addLayout(controls)
         row = QHBoxLayout()
         outer.addLayout(row, 1)
+        video = QWidget()
+        self.video_grid = QGridLayout(video)
+        self.video_grid.setContentsMargins(0, 0, 0, 0)
         self.view = CameraView()
-        row.addWidget(self.view, 1)
+        self.views[0] = self.view
+        self.video_grid.addWidget(self.view, 0, 0)
+        video_scroll = QScrollArea()
+        video_scroll.setWidgetResizable(True)
+        video_scroll.setWidget(video)
+        row.addWidget(video_scroll, 1)
         sidebar = QWidget()
         sidebar.setMinimumWidth(335)
         side = QVBoxLayout(sidebar)
@@ -177,10 +195,16 @@ class Window(QMainWindow):
         row.addWidget(scroll)
         config = QGroupBox("PERANGKAT & KONTROL")
         form = QFormLayout(config)
-        self.camera_id = QSpinBox()
-        self.camera_id.setRange(0, 20)
-        self.camera_id.setValue(int(self.preferences.value("camera", 0)))
-        form.addRow("Kamera", self.camera_id)
+        self.camera_ids = QLineEdit()
+        self.camera_ids.setText(str(self.preferences.value("camera_ids", self.preferences.value("camera", 0))))
+        self.camera_ids.setPlaceholderText("0,1,2")
+        self.camera_ids.setToolTip("Urutan pertama adalah kamera utama dan tombol virtual. Maksimal 8 kamera.")
+        form.addRow("ID kamera", self.camera_ids)
+        self.camera_flip = QLineEdit()
+        self.camera_flip.setText(str(self.preferences.value("camera_flip", "")))
+        self.camera_flip.setPlaceholderText("Opsional: 1,2")
+        self.camera_flip.setToolTip("Kamera yang label tangan kanan/kirinya perlu dibalik relatif terhadap kamera utama.")
+        form.addRow("Balik label kamera", self.camera_flip)
         self.backend_choice = QComboBox()
         backends = (
             (
@@ -228,12 +252,14 @@ class Window(QMainWindow):
         self.smoothness.setValue(float(self.preferences.value("cutoff", 1.5)))
         self.smoothness.setToolTip("Lebih rendah = lebih halus; lebih tinggi = lebih responsif")
         form.addRow("Respons gerakan", self.smoothness)
-        self.pinky = QComboBox()
-        self.pinky.addItem("Pindah jendela", "window")
-        self.pinky.addItem("Resize jendela", "resize")
-        form.addRow("Cubit kelingking", self.pinky)
         self.zoom_mode = QCheckBox("Mode zoom dua tangan")
         form.addRow(self.zoom_mode)
+        self.fingertip_window = QCheckBox("Ujung telunjuk: cubit untuk tarik jendela")
+        self.fingertip_window.setChecked(self.preferences.value("fingertip_window", False, type=bool))
+        self.fingertip_window.setToolTip(
+            "Mode ini mengganti cubitan telunjuk pembawa kursor. Posisi ujung jari dipetakan ke seluruh layar."
+        )
+        form.addRow(self.fingertip_window)
         self.backend_choice.currentIndexChanged.connect(self.update_backend_options)
         self.update_backend_options()
         self.overlay_toggle = QCheckBox("Kursor desktop tambahan (X11 / Windows)")
@@ -261,9 +287,7 @@ class Window(QMainWindow):
         cursor_layout = QVBoxLayout(cursor_group)
         self.cursor_map = CursorMap()
         cursor_layout.addWidget(self.cursor_map)
-        caption = QLabel(
-            "R hijau • L ungu. Satu tangan menguasai mouse\nsampai gestur dilepas. Posisi lainnya tetap disimpan."
-        )
+        caption = QLabel("R hijau • L ungu. MouseMux: dua pointer asli; backend lain: satu pointer OS.")
         caption.setWordWrap(True)
         cursor_layout.addWidget(caption)
         side.addWidget(cursor_group)
@@ -274,7 +298,9 @@ class Window(QMainWindow):
             "Ibu jari + tengah → klik kiri saat dilepas\n"
             "Tambah telunjuk saat ditahan → drag\n"
             "Ibu jari + manis → klik kanan\n"
-            "Ibu jari + kelingking → aksi pilihan\n"
+            "Satu kelingking + ibu jari → pindah jendela\n"
+            "Dua kelingking + ibu jari → tarik keluar/dalam untuk resize\n"
+            "Mode ujung jari: telunjuk + ibu jari → tarik jendela\n"
             "Dua cubitan → dua kursor / mode zoom\n\n"
             "Lepaskan semua cubitan antar gestur.\n"
             "Arahkan telunjuk ke tombol kamera\n"
@@ -310,8 +336,9 @@ class Window(QMainWindow):
             gain=self.gain.value(),
             min_cutoff=self.smoothness.value(),
             two_hand_zoom=self.zoom_mode.isChecked(),
-            pinky_action=self.pinky.currentData(),
+            pinky_action="window",
             independent=self.backend_choice.currentData() == "mousemux",
+            fingertip_window=self.fingertip_window.isChecked(),
         )
         self.controller = Controller(
             self.backend_choice.currentData(),
@@ -332,27 +359,65 @@ class Window(QMainWindow):
         )
 
     def toggle_camera(self):
-        if self.camera and self.camera.is_alive():
+        if self.cameras and any(w.is_alive() and not w.stop_event.is_set() for w in self.cameras.values()):
             self.pause()
-            self.camera.stop()
-        else:
-            self.camera = CameraWorker(
-                self.camera_id.value(), self.args.model, self.on_hands, swap=self.swap_hands.isChecked()
-            )
-            self.camera.start()
-
-    def on_hands(self, hands):
-        if self.controller:
-            # GUI owns button hit testing. The controller gets input only after that arbitration.
-            if not hands:
+            for worker in self.cameras.values():
+                worker.stop()
+                worker.status = "Kamera dihentikan"
+            if self.controller:
                 self.controller.submit([])
+            return
+        if any(w.is_alive() for w in self.cameras.values()):
+            self.camera_error = "Menunggu kamera lama berhenti; coba lagi sebentar."
+            self.status.setText(self.camera_error)
+            return
+        try:
+            camera_ids = parse_camera_ids(self.camera_ids.text())
+            flip_ids = parse_camera_ids(self.camera_flip.text()) if self.camera_flip.text().strip() else ()
+            if any(i not in camera_ids for i in flip_ids):
+                raise ValueError("ID 'Balik label kamera' harus termasuk dalam daftar kamera aktif")
+        except ValueError as exc:
+            self.camera_error = str(exc)
+            self.status.setText(self.camera_error)
+            return
+        self.camera_error = ""
+        self.pause()
+        self.packets.clear()
+        self.last_seen = 0
+        self.fusion = MultiCameraFusion(camera_ids)
+        for view in tuple(self.views.values()):
+            self.video_grid.removeWidget(view)
+            if view is not self.view:
+                view.deleteLater()
+        self.views = {}
+        for position, camera_id in enumerate(camera_ids):
+            view = self.view if position == 0 else CameraView()
+            view.camera_id = camera_id
+            view.buttons_enabled = position == 0
+            view.frame, view.hands = None, []
+            minimum_size = (560, 420) if len(camera_ids) == 1 else (240, 180)
+            view.setMinimumSize(*minimum_size)
+            self.video_grid.addWidget(view, position // 2, position % 2)
+            self.views[camera_id] = view
+        self.cameras = {
+            camera_id: CameraWorker(
+                camera_id,
+                self.args.model,
+                lambda _hands: None,
+                swap=self.swap_hands.isChecked() ^ (camera_id in flip_ids),
+            )
+            for camera_id in camera_ids
+        }
+        self.camera = self.cameras[camera_ids[0]]
+        for worker in self.cameras.values():
+            worker.start()
 
     def toggle_arm(self):
         if not self.controller or not self.controller.ready:
             return
         enabled = not self.controller.enabled
         if enabled and (
-            not self.camera or not self.camera.is_alive() or time.monotonic() - self.last_seen > 0.3
+            not self.cameras or time.monotonic() - self.last_seen > 0.3
         ):
             return
         self.controller.arm(enabled)
@@ -363,44 +428,56 @@ class Window(QMainWindow):
 
     def tick(self):
         now = time.monotonic()
-        packet = self.camera.take() if self.camera else None
-        if packet and now - packet[3] <= 0.20:
-            frame, hands, fps, timestamp = packet
-            self.last_seen = timestamp
-            h, w, _ = frame.shape
-            self.view.frame = QImage(frame.data, w, h, frame.strides[0], QImage.Format_RGB888).copy()
-            self.view.hands, self.view.fps = hands, fps
-            target = None
-            button_hand = None
-            for candidate in sorted(hands, key=lambda h: h.side != self.hand.currentData()):
-                if candidate.confidence < 0.65:
-                    continue
-                if all(candidate.ratio(i) >= 0.46 for i in (8, 12, 16, 20)):
-                    tip = QPointF(*candidate.points[8])
-                    target = next(
-                        (name for name, rect in self.view.buttons().items() if rect.contains(tip)), None
-                    )
-                    if target:
-                        button_hand = candidate.track_id, candidate.side
-                        break
-            if button_hand != self.button_hand:
-                self.dwell = Dwell()
-                self.button_hand = button_hand
-            fired, progress = self.dwell.update(target, now, 0.9)
-            self.view.dwell_target, self.view.progress = target, progress
-            if fired:
-                self.pause() if target == "stop" else self.toggle_arm()
-            if self.controller:
-                self.controller.submit([] if target else hands)
-            descriptions = [
-                f"{'Kanan' if h.side == 'Right' else 'Kiri'} {h.confidence:.0%}: "
-                + (", ".join(h.extended()) or "jari menekuk")
-                for h in hands
-            ]
-            self.details.setText("   |   ".join(descriptions) or "Tangan belum terdeteksi — input dilepas")
+        detections = {}
+        for camera_id, worker in self.cameras.items():
+            packet = worker.take()
+            if packet and not worker.stop_event.is_set():
+                self.packets[camera_id] = packet
+                frame, hands, fps, timestamp = packet
+                view = self.views[camera_id]
+                h, w, _ = frame.shape
+                view.frame = QImage(frame.data, w, h, frame.strides[0], QImage.Format_RGB888).copy()
+                view.fps = fps
+                view.update()
+            packet = self.packets.get(camera_id)
+            view = self.views[camera_id]
+            if packet and now - packet[3] <= 0.20 and not worker.stop_event.is_set():
+                detections[camera_id] = packet[1]
+                view.hands = packet[1]
+                self.last_seen = max(self.last_seen, packet[3])
+            else:
+                view.hands = []
+                view.fps = 0
+        hands = self.fusion.select(detections) if self.fusion else []
+        primary_id = self.fusion.ids[0] if self.fusion else None
+        primary_hands = detections.get(primary_id, [])
+        target = None
+        button_hand = None
+        for candidate in sorted(primary_hands, key=lambda h: h.side != self.hand.currentData()):
+            if candidate.confidence < 0.65:
+                continue
+            if all(candidate.ratio(i) >= 0.46 for i in (8, 12, 16, 20)):
+                tip = QPointF(*candidate.points[8])
+                target = next((name for name, rect in self.view.buttons().items() if rect.contains(tip)), None)
+                if target:
+                    button_hand = candidate.track_id, candidate.side
+                    break
+        if button_hand != self.button_hand:
+            self.dwell = Dwell()
+            self.button_hand = button_hand
+        fired, progress = self.dwell.update(target, now, 0.9)
+        self.view.dwell_target, self.view.progress = target, progress
+        if fired:
+            self.pause() if target == "stop" else self.toggle_arm()
+        if self.controller:
+            self.controller.submit([] if target else hands)
+        descriptions = [
+            f"{'Kanan' if h.side == 'Right' else 'Kiri'} (kamera {h.camera_id}) {h.confidence:.0%}: "
+            + (", ".join(h.extended()) or "jari menekuk")
+            for h in hands
+        ]
+        self.details.setText("   |   ".join(descriptions) or "Tangan belum terdeteksi — input dilepas")
         if now - self.last_seen > 0.3:
-            self.view.hands = []
-            self.view.fps = 0
             self.dwell.update(None, now, 0.9)
             self.view.dwell_target = None
             if self.controller:
@@ -408,10 +485,12 @@ class Window(QMainWindow):
         controller_alive = bool(self.controller and self.controller.is_alive())
         ready = bool(self.controller and self.controller.ready)
         active = bool(self.controller and self.controller.enabled)
-        camera_alive = bool(self.camera and self.camera.is_alive() and not self.camera.stop_event.is_set())
-        self.view.active = active
-        self.view.mode = self.controller.mode if active else "jeda"
-        self.view.labels = self.show_labels.isChecked()
+        camera_alive = any(w.is_alive() and not w.stop_event.is_set() for w in self.cameras.values())
+        cameras_running = any(w.is_alive() for w in self.cameras.values())
+        for view in self.views.values():
+            view.active = active
+            view.mode = self.controller.mode if active else "jeda"
+            view.labels = self.show_labels.isChecked()
         self.arm_button.setEnabled(ready and camera_alive and now - self.last_seen < 0.3)
         self.arm_button.setText("Jeda kontrol" if active else "Aktifkan kontrol")
         self.connect_button.setText(
@@ -430,18 +509,20 @@ class Window(QMainWindow):
             self.resize_mouse,
             self.backend_choice,
             self.smoothness,
-            self.pinky,
+            self.fingertip_window,
             self.zoom_mode,
         ):
             widget.setEnabled(not controller_alive)
         if self.backend_choice.currentData() == "mousemux":
             self.zoom_mode.setEnabled(False)
-        self.camera_id.setEnabled(not camera_alive)
-        self.swap_hands.setEnabled(not camera_alive)
+        self.camera_ids.setEnabled(not cameras_running)
+        self.camera_flip.setEnabled(not cameras_running)
+        self.swap_hands.setEnabled(not cameras_running)
         cursors = dict(self.controller.cursors) if self.controller else {}
         owner = self.controller.owner if active else None
         self.cursor_map.cursors, self.cursor_map.owner = cursors, owner
-        self.view.cursors, self.view.owner = cursors, owner
+        for view in self.views.values():
+            view.cursors, view.owner = cursors, owner
         self.cursor_map.update()
         desktop_overlay = bool(
             self.controller
@@ -461,32 +542,44 @@ class Window(QMainWindow):
         else:
             self.overlay.hide()
         self.status.setText(
-            (self.camera.status if self.camera else "Kamera belum aktif")
+            (self.camera_error + "  |  " if self.camera_error else "")
+            + (
+                "  /  ".join(
+                    f"{i}: {w.status if not w.stop_event.is_set() else 'Kamera dihentikan'}"
+                    for i, w in self.cameras.items()
+                )
+                if self.cameras else "Kamera belum aktif"
+            )
             + "  |  "
             + (self.controller.status if self.controller else "Desktop belum terhubung")
         )
-        self.view.update()
+        for view in self.views.values():
+            view.update()
 
     def closeEvent(self, event):
+        if self.closing_at is None:
+            self.closing_at = time.monotonic()
         self.pause()
         self.overlay.hide()
-        if self.camera:
-            self.camera.stop()
+        for camera in self.cameras.values():
+            camera.stop()
         if self.controller:
             self.controller.stop()
         # Input release is performed by its owning thread before allowing the window to disappear.
-        if self.controller and self.controller.is_alive():
+        controller_running = self.controller and self.controller.is_alive()
+        camera_shutting_down = any(w.is_alive() for w in self.cameras.values()) and time.monotonic() - self.closing_at < 1
+        if controller_running or camera_shutting_down:
             self.status.setText("Menutup sesi desktop; batalkan dialog izin jika masih terbuka…")
             event.ignore()
             QTimer.singleShot(100, self.close)
             return
-        self.preferences.setValue("camera", self.camera_id.value())
+        self.preferences.setValue("camera_ids", self.camera_ids.text())
+        self.preferences.setValue("camera_flip", self.camera_flip.text())
         self.preferences.setValue("hand", self.hand.currentIndex())
         self.preferences.setValue("gain", self.gain.value())
         self.preferences.setValue("cutoff", self.smoothness.value())
         self.preferences.setValue("swap_v3", self.swap_hands.isChecked())
-        if self.camera:
-            self.camera.join(timeout=0.5)
+        self.preferences.setValue("fingertip_window", self.fingertip_window.isChecked())
         self.overlay.close()
         event.accept()
 

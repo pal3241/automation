@@ -85,7 +85,7 @@ python -m deskpilot --model /path/hand_landmarker.task
 
 ## Urutan penggunaan
 
-1. Buka aplikasi, pilih nomor kamera dan prioritas jika dua tangan memulai gestur bersamaan.
+1. Buka aplikasi, isi **ID kamera** seperti `0,1` untuk dua perspektif (`0,1,2` untuk tiga; maksimal delapan kamera). ID pertama adalah kamera utama untuk tombol virtual. Jika label suatu kamera dari arah belakang terbalik, masukkan ID-nya di **Balik label kamera**, misalnya `1`.
 2. Mulai kamera. Cocokkan label KANAN/KIRI dengan tanganmu pada tampilan bercermin. Default pertukaran label sekarang aktif; jika kameramu sudah benar, matikan **Tukar label kiri/kanan kamera** sebelum mulai menangkap gambar.
 3. Hubungkan desktop. Windows langsung memakai API lokal. Pada Wayland, izinkan **keyboard + pointer** dan pilih **satu monitor penuh** pada dialog portal.
 4. Aktifkan kontrol melalui tombol GUI atau arahkan telunjuk ke tombol virtual AKTIFKAN selama 0,9 detik dengan tangan tidak mencubit.
@@ -94,7 +94,13 @@ python -m deskpilot --model /path/hand_landmarker.task
 
 Mulai dengan `python -m deskpilot --preview` jika ingin menguji deteksi tanpa mengirim input ke desktop. Hubungkan backend Preview dan aktifkan kontrol untuk melihat perubahan status gestur.
 
-## Gestur v0.2 — dua kursor
+## Kamera multiperspektif (v0.5)
+
+Setiap kamera menjalankan capture dan pelacakannya sendiri, lalu semua tayangan muncul dalam grid yang dapat digulir. Model pertama kali diunduh satu kali secara tersinkronisasi sehingga beberapa kamera tidak menulis file yang sama bersamaan. Hasilnya **bukan rekonstruksi 3D/triangulasi**: satu tangan yang terlihat di beberapa kamera dipilih sebagai satu sumber kendali berdasarkan label kanan/kiri, bukan dihitung sebagai dua tangan. Kamera yang sedang dipakai dipertahankan sampai tangan tidak terlihat; saat pindah ke kamera lain, identitas berubah dan **tangan harus dibuka lalu dicubit lagi** untuk mencegah kursor melompat. Tidak ada sinkronisasi hardware antarkamera. Mulailah dengan dua kamera karena setiap kamera membutuhkan inferensi tambahan dan dapat menurunkan FPS.
+
+Tombol virtual hanya aktif pada kamera pertama; Stop di GUI tetap dapat dipakai saat kamera utama terhalang. Seluruh gambar tetap diproses lokal. Jika satu kamera gagal dibuka, status kegagalannya terlihat per ID dan kamera lain tetap bisa digunakan. Untuk resize, kedua tangan wajib terlihat bersama pada **satu kamera yang sama** agar jaraknya bermakna; sudut pandang berbeda tidak dikalibrasi dan tidak digabung untuk mengukur tarikan.
+
+## Gestur — dua kursor dan sentuhan jari
 
 Setiap tangan memiliki **posisi kursor virtual sendiri**, warna hijau R (kanan) dan ungu L (kiri). Kedua penunjuk terlihat di atas tampilan kamera dan peta posisi layar pada GUI. Posisi awal berasal dari telunjuk saat tangan pertama kali terdeteksi; setelah itu tersimpan, tidak mengikuti tangan terbuka. Cubit telunjuk untuk membawa kursor ke target, lalu lepaskan sebelum klik. Klik memakai posisi kursor tangan itu, bukan memetakan ulang ujung jari yang sedang menekuk.
 
@@ -106,11 +112,13 @@ Setiap tangan memiliki **posisi kursor virtual sendiri**, warna hijau R (kanan) 
 | Lepas telunjuk saat tengah masih menyentuh | Drag berhenti bergerak, tombol kiri tetap ditahan |
 | Lepas tengah / buka tangan | Lepas tombol kiri dan drop |
 | Jari manis menyentuh ibu jari | Klik kanan sekali per cubitan |
-| Kelingking menyentuh ibu jari | Pindah atau resize jendela, sesuai pilihan GUI |
+| Satu tangan: kelingking menyentuh ibu jari | Pindah jendela dari posisi kursor tangan itu |
+| Kedua tangan: kelingking menyentuh ibu jari, lalu tarik keluar/dalam | Perbesar/perkecil jendela di posisi kursor tangan aktif, dalam kamera yang sama |
+| Centang **Ujung telunjuk: cubit untuk tarik jendela**, lalu cubit telunjuk + ibu jari | Ambil jendela tepat di posisi ujung telunjuk dan tarik mengikuti ujung jari; lepas untuk menjatuhkan |
 | Dua tangan mencubit telunjuk | Dua kursor bergerak sendiri; jika **Mode zoom dua tangan** dicentang, berubah menjadi Ctrl+scroll |
 | Telunjuk terbuka di tombol virtual 0,9 detik | Aktifkan/jeda/Stop, satu aktivasi per masuk area |
 
-Cubit telunjuk saja tetap merupakan clutch, bukan mouse-down. Untuk drag file atau titlebar, gunakan tengah + telunjuk + ibu jari. Jari manis sekarang khusus klik kanan. Aksi kelingking bisa dipilih **Pindah jendela** atau **Resize jendela** sebelum menghubungkan desktop.
+Secara default cubitan telunjuk adalah clutch tanpa mouse-down; untuk drag file/titlebar gunakan tengah + telunjuk + ibu jari. Jika **mode ujung telunjuk** diaktifkan, cubitan telunjuk berubah menjadi *ambil dan tarik jendela* (bukan pembawa kursor). Ujung jari yang dicerminkan dipetakan langsung ke seluruh desktop, bukan hanya jendela GUI; arahkan kamera ke layar dari depan dan uji dulu di Preview. Perubahan mode memerlukan putus/hubung ulang backend. Gestur dua kelingking melepaskan aksi satu tangan yang sedang aktif sebelum memulai resize, dan melepas satu tangan mengakhiri resize; buka kedua tangan untuk mengaktifkan gestur berikutnya.
 
 ### Dua tangan dan mouse sistem
 
@@ -143,7 +151,7 @@ Zoom memakai Ctrl+scroll pada aplikasi yang mendukungnya, bukan pembesaran selur
 | Wayland tanpa portal RemoteDesktop yang memadai | Preview kamera | GUI menampilkan error jelas; kontrol tidak dianggap aktif |
 | macOS | Belum tersedia | Gunakan mode Preview; belum ada backend input macOS |
 
-Pada **Windows**, cubitan kelingking memilih jendela di bawah posisi kursor virtual, lalu memindahkan atau mengubah ukurannya melalui API native. Pulihkan jendela yang maximized/minimized sebelum gestur. Windows dapat menolak input atau perubahan jendela milik aplikasi yang dijalankan sebagai Administrator; jalankan DeskPilot dengan tingkat hak yang sama hanya jika benar-benar diperlukan.
+Pada **Windows**, satu cubitan kelingking memilih jendela di bawah kursor untuk dipindah; dua cubitan kelingking mengubah ukuran jendela ketika tangan ditarik keluar/dalam. Mode ujung telunjuk mengambil jendela tepat di bawah ujung jari. Pulihkan jendela yang maximized/minimized sebelum gestur. Windows dapat menolak input atau perubahan jendela milik aplikasi yang dijalankan sebagai Administrator; jalankan DeskPilot dengan tingkat hak yang sama hanya jika benar-benar diperlukan.
 
 Pada **Linux**, pindah/resize bergantung pada shortcut window manager. Default Super+left-drag untuk pindah; resize memakai mouse tengah saat sesi terdeteksi GNOME, atau kanan untuk desktop lain. GUI menyediakan pilihan modifier Super/Alt dan mouse resize kanan/tengah. Sesuaikan dengan shortcut desktop. Jendela fullscreen atau aplikasi dengan ukuran tetap mungkin menolak resize. Program tidak mengubah pengaturan desktop secara otomatis.
 
@@ -166,14 +174,15 @@ Sesi desktop aktual tetap perlu diuji pada perangkat pengguna. Keberadaan kode b
 
 - `deskpilot/gestures.py`: dua state kursor, klik/drag, arbitrasi pemilik, debounce, zoom, dan dwell.
 - `deskpilot/tracking.py`: asosiasi identitas tangan dan filter adaptif.
+- `deskpilot/multicamera.py`: validasi ID kamera, deduplikasi dua sudut, dan rearm saat perpindahan kamera.
 - `deskpilot/cursors.py`: peta dua kursor dan overlay transparan X11/Windows.
 - `deskpilot/controller.py`: satu pemilik input, mailbox terbatas, pembatalan dan watchdog.
 - `deskpilot/backends/`: kontrak tindakan, preview, Win32, MouseMux V2 opsional, X11, dan Wayland portal.
-- `deskpilot/camera.py`: pengunduhan model, capture kamera, dan inferensi dua tangan.
+- `deskpilot/camera.py`: pengunduhan model tersinkronisasi, capture dan inferensi per kamera.
 - `deskpilot/app.py`: GUI, overlay kamera, pengaturan, arbitrasi tombol virtual.
 - `tests/`: tes transisi gestur, kepemilikan input, watchdog, portal mock, dan rendering GUI.
 
-Pengaturan kamera, prioritas tangan, sensitivitas, respons gerakan, dan pertukaran label disimpan melalui Qt QSettings. Untuk mengubah tangan/sensitivitas/modifier/tombol resize, putuskan lalu hubungkan kembali backend.
+Pengaturan daftar kamera, pembalikan label per kamera, mode ujung jari, prioritas tangan, sensitivitas, dan respons gerakan disimpan melalui Qt QSettings. Untuk mengubah sumber kamera hentikan semua kamera dulu; untuk mengubah mode gestur/tangan/sensitivitas/modifier, putuskan lalu hubungkan kembali backend.
 
 ## Pengembangan
 

@@ -1,8 +1,8 @@
-# Foundation contracts — v0.2
+# Foundation contracts — v0.5
 
 ## Threads and ownership
 
-Qt owns widgets, camera button arbitration, and the optional X11/Windows overlay. CameraWorker owns OpenCV, MediaPipe, and HandTracker. One latest frame is pulled by Qt; old frames are discarded. Controller owns GestureEngine and the desktop connection. It publishes immutable cursor-position snapshots for the GUI. No frame queue grows without bound.
+Qt owns widgets, camera button arbitration, and the optional X11/Windows overlay. One CameraWorker per ID owns its OpenCV capture, MediaPipe detector, and HandTracker; every source has a latest-frame mailbox. A shared lock guards the one-time model download. Qt pulls packets and MultiCameraFusion selects at most one observation per anatomical side, preferring a shared camera for two-hand actions. Source ID is part of the tracking identity: switching viewpoint releases input and requires an open hand. No uncalibrated multi-view triangulation or physical 3D hand matching is claimed. Controller owns GestureEngine and the desktop connection. It publishes cursor-position snapshots for the GUI. No frame queue grows without bound.
 
 Each hand has a separate cursor position, filter, debounce state, pinch hysteresis, track ID and rearm state. Only one hand owns desktop input at a time. The existing owner is processed first. Other hands may move their logical cursors but their clicks are suppressed, not queued. They must release/regrip after the owner finishes. Priority config breaks simultaneous starts only.
 
@@ -18,7 +18,7 @@ Unmatched tracks expire after 250 ms; missing hands are not extrapolated into ac
 
 Palm motion avoids sudden index-tip changes when folding fingers. The adaptive low-pass uses elapsed time and filtered velocity, with a small spatial deadband. Each logical cursor stores bounded normalized screen coordinates; absolute backend moves avoid losing subpixel deltas to integer relative input. On regrip, the palm anchor resets and the saved cursor stays unchanged (the system pointer may move to that hand's saved cursor on ownership acquisition).
 
-Thumb-middle emits one left-down. Adding index upgrades to drag, retaining that button without releasing/pressing again. Removing index freezes motion, retaining left-down; removing middle releases. Thumb-ring emits right click once. Thumb-pinky begins the configured window-manager drag. Thumb-index alone moves the cursor without a mouse button. Unrecognized multi-finger contacts reset/rearm instead of choosing a possibly destructive gesture.
+Thumb-middle emits one left-down. Adding index upgrades to drag, retaining that button without releasing/pressing again. Removing index freezes motion, retaining left-down; removing middle releases. Thumb-ring emits right click once. One thumb-pinky begins the window-manager drag. Paired thumb-pinky on the same camera ends any earlier drag, starts one resize at the current cursor and maps the change in palm separation onto size; losing either hand releases and rearms. Thumb-index normally moves the cursor without mouse-down. Opt-in fingertip mode instead starts a window move at the absolute index tip and follows its smoothed position until release. Unrecognized multi-finger contacts reset/rearm instead of choosing a possibly destructive gesture.
 
 Activation is debounced 55 ms by time; release is immediate. Ratios use palm width and image aspect correction with distinct pinch-on/pinch-off thresholds. Zoom is opt-in and takes priority only when both hands request index clutch; exiting zoom releases and rearms both hands.
 

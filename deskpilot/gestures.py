@@ -32,6 +32,7 @@ class Hand:
     confidence: float = 1.0
     aspect: float = 4 / 3
     track_id: int = 0
+    camera_id: int = 0
 
     def distance(self, a, b):
         p, q = self.points[a], self.points[b]
@@ -67,6 +68,7 @@ class Settings:
     two_hand_zoom: bool = False
     pinky_action: str = "window"
     independent: bool = False
+    fingertip_window: bool = False
 
 
 @dataclass
@@ -90,6 +92,7 @@ class GestureEngine:
         self.owner = None
         self.mode = "idle"
         self.zoom_anchor = None
+        self.resize_anchor = None
 
     @property
     def cursors(self):
@@ -111,7 +114,14 @@ class GestureEngine:
         self.owner = None
         self.mode = "idle"
         self.zoom_anchor = None
+        self.resize_anchor = None
         return [Action("release")]
+
+    @staticmethod
+    def hand_span(a, b):
+        pa, pb = palm(a), palm(b)
+        aspect = (a.aspect + b.aspect) / 2
+        return math.hypot((pa[0] - pb[0]) * aspect, pa[1] - pb[1])
 
     def wanted(self, hand, state):
         for tip in (8, 12, 16, 20):
@@ -120,7 +130,7 @@ class GestureEngine:
         fingers = {tip for tip, closed in state.pinches.items() if closed}
         return {
             frozenset(): "idle",
-            frozenset({8}): "cursor",
+            frozenset({8}): "window_tip" if self.settings.fingertip_window else "cursor",
             frozenset({12}): "left",
             frozenset({8, 12}): "drag",
             frozenset({16}): "right",
@@ -186,6 +196,48 @@ class GestureEngine:
             return actions
         if self.zoom_anchor is not None:
             return self.reset()
+        pinky_pair = (
+            len(desired) == 2
+            and all(self.states[s].pinches.get(20) for s in ("Right", "Left"))
+            and all(desired[s] in ("window", "resize", "pair_resize") for s in ("Right", "Left"))
+        )
+        same_camera = pinky_pair and observed["Right"].camera_id == observed["Left"].camera_id
+        if self.resize_anchor is not None:
+            distance, side, start_cursor, track_ids, camera_id, last_delta = self.resize_anchor
+            if not same_camera or tuple(observed[s].track_id for s in ("Right", "Left")) != track_ids:
+                return self.reset()
+            delta = self.hand_span(observed["Right"], observed["Left"]) - distance
+            if abs(delta - last_delta) >= 0.006:
+                position = tuple(max(0, min(1, axis + delta * self.settings.gain)) for axis in start_cursor)
+                self.states[side].cursor = position
+                actions.append(Action("pointer_at", position, side if self.settings.independent else None))
+                self.resize_anchor = (distance, side, start_cursor, track_ids, camera_id, delta)
+            self.mode = "resize dua tangan"
+            return actions
+        if pinky_pair and not same_camera:
+            return self.reset()
+        if same_camera:
+            side = self.owner or self.settings.dominant
+            start_cursor = self.states[side].cursor
+            if start_cursor is None:
+                return self.reset()
+            # End a pending one-handed window drag before starting paired resize.
+            actions.append(Action("release"))
+            self.owner = None
+            for state in self.states.values():
+                state.mode = "pair_resize"
+                state.previous = state.filter = None
+            self.resize_anchor = (
+                self.hand_span(observed["Right"], observed["Left"]),
+                side,
+                start_cursor,
+                tuple(observed[s].track_id for s in ("Right", "Left")),
+                observed[side].camera_id,
+                0.0,
+            )
+            actions.append(Action("begin_resize", start_cursor, side if self.settings.independent else None))
+            self.mode = "resize dua tangan"
+            return actions
         # Existing owner first. A newly arriving hand cannot steal a held click/drag.
         order = sorted(desired, key=lambda side: (side != self.owner, side != self.settings.dominant))
         for side in order:
@@ -219,21 +271,29 @@ class GestureEngine:
             owns = (self.settings.independent or self.owner == side) and not state.blocked
             if entering:
                 state.filter = SmoothPoint(self.settings.min_cutoff)
-                state.previous = state.filter.update(palm(hand), now)
+                if wanted == "window_tip":
+                    state.cursor = tuple(max(0, min(1, v)) for v in hand.points[8])
+                state.previous = state.filter.update(
+                    hand.points[8] if wanted == "window_tip" else palm(hand), now
+                )
                 if owns:
                     if wanted in ("left", "drag") and old not in ("left", "drag"):
                         actions.append(Action("left_down_at", state.cursor, side if self.settings.independent else None))
                     elif wanted == "right":
                         actions.append(Action("right_click_at", state.cursor, side if self.settings.independent else None))
-                    elif wanted in ("window", "resize"):
-                        actions.append(Action("begin_" + wanted, state.cursor, side if self.settings.independent else None))
+                    elif wanted in ("window", "resize", "window_tip"):
+                        kind = "window" if wanted == "window_tip" else wanted
+                        actions.append(Action("begin_" + kind, state.cursor, side if self.settings.independent else None))
                     elif wanted == "cursor":
                         actions.append(Action("pointer_at", state.cursor, side if self.settings.independent else None))
-            if wanted in ("cursor", "drag", "window", "resize"):
-                point = state.filter.update(palm(hand), now)
+            if wanted in ("cursor", "drag", "window", "resize", "window_tip"):
+                point = state.filter.update(hand.points[8] if wanted == "window_tip" else palm(hand), now)
                 if math.dist(point, state.previous) >= 0.0007:
-                    delta = tuple((p - q) * self.settings.gain for p, q in zip(point, state.previous))
-                    state.cursor = tuple(max(0, min(1, p + d)) for p, d in zip(state.cursor, delta))
+                    if wanted == "window_tip":
+                        state.cursor = tuple(max(0, min(1, v)) for v in point)
+                    else:
+                        delta = tuple((p - q) * self.settings.gain for p, q in zip(point, state.previous))
+                        state.cursor = tuple(max(0, min(1, p + d)) for p, d in zip(state.cursor, delta))
                     state.previous = point
                     if owns:
                         actions.append(Action("pointer_at", state.cursor, side if self.settings.independent else None))
