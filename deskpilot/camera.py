@@ -35,7 +35,7 @@ def ensure_model(path):
 
 
 class CameraWorker(threading.Thread):
-    def __init__(self, index, model_path, consumer, swap=False):
+    def __init__(self, index, model_path, consumer, swap=True):
         super().__init__(daemon=True, name="camera-tracking")
         self.index, self.model_path, self.consumer = index, model_path, consumer
         self.stop_event = threading.Event()

@@ -23,6 +23,10 @@ Automated tests cover logic and simulated input. Complete this checklist on an a
 - [ ] Windows pinky move/resize targets the window below its saved cursor; maximized/minimized targets show a clear error and do not stick input.
 - [ ] Windows overlay shows both logical cursors, remains click-through, does not take focus, and follows the complete virtual desktop geometry.
 - [ ] Windows elevated application is not assumed controllable from a non-elevated DeskPilot process.
+- [ ] With MouseMux V2 SDK enabled and Multiplex mode active, two hands move different desktop pointers simultaneously while physical mouse remains independent.
+- [ ] MouseMux: hold left drag with both hands; releasing or losing one hand does not release the other. Stop releases both, and closing DeskPilot destroys only its two virtual users.
+- [ ] MouseMux: SDK missing/stopped/full-screen coordinate limits fail clearly without sending actions through the shared SendInput pointer. Check negative-screen-coordinate monitor layout.
+- [ ] Left/right labels match physical hands with default swap on and off on different webcam models; setting persists on the next launch.
 - [ ] Track CPU/FPS and practical latency at 640x480; reduce background load if necessary.
 
 Record distro, session type, compositor version, Python/dependency versions, camera model, and observed results. Do not interpret unit-test success as this checklist being complete.

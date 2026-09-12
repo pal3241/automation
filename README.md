@@ -30,7 +30,9 @@ git pull --ff-only
 .\.venv\Scripts\python.exe -m deskpilot
 ```
 
-Tidak perlu memasang driver input Python tambahan: backend memakai Win32 `SendInput` melalui pustaka standar `ctypes`. Jika kamera tidak terbuka, tutup Camera/Teams/OBS atau aplikasi lain yang sedang memakai webcam, lalu coba nomor kamera lain di GUI.
+Untuk **dua pointer Windows independen**, jalankan [MouseMux V2](https://www.mousemux.com/pages/sdk-windows/), aktifkan Windows SDK sesuai panduan MouseMux, lalu gunakan mode **Multiplex**. DeskPilot memilih backend `MouseMux V2 (dua pointer independen)` secara default di Windows. Setiap tangan membuat satu pengguna virtual di MouseMux; mouse fisik tetap milik pengguna/perangkatnya sendiri. Jika tidak memiliki MouseMux atau SDK tidak tersedia, pilih `Windows / SendInput (satu pointer)` untuk mode lama. Program tidak menginstal atau mengubah konfigurasi MouseMux secara otomatis. Dukungan SDK/fitur dapat bergantung pada edisi MouseMux; periksa persyaratan lisensinya.
+
+Backend SendInput biasa tidak membutuhkan driver Python tambahan. Bila kamera tidak terbuka, tutup Camera/Teams/OBS atau aplikasi lain yang memakai webcam, lalu coba nomor kamera lain di GUI.
 
 ### Linux
 
@@ -84,7 +86,7 @@ python -m deskpilot --model /path/hand_landmarker.task
 ## Urutan penggunaan
 
 1. Buka aplikasi, pilih nomor kamera dan prioritas jika dua tangan memulai gestur bersamaan.
-2. Mulai kamera. Cocokkan label KANAN/KIRI dengan tanganmu pada tampilan bercermin.
+2. Mulai kamera. Cocokkan label KANAN/KIRI dengan tanganmu pada tampilan bercermin. Default pertukaran label sekarang aktif; jika kameramu sudah benar, matikan **Tukar label kiri/kanan kamera** sebelum mulai menangkap gambar.
 3. Hubungkan desktop. Windows langsung memakai API lokal. Pada Wayland, izinkan **keyboard + pointer** dan pilih **satu monitor penuh** pada dialog portal.
 4. Aktifkan kontrol melalui tombol GUI atau arahkan telunjuk ke tombol virtual AKTIFKAN selama 0,9 detik dengan tangan tidak mencubit.
 5. Buka tangan sekali untuk mengaktifkan pengenal gestur, lalu coba gestur di bawah.
@@ -112,9 +114,11 @@ Cubit telunjuk saja tetap merupakan clutch, bukan mouse-down. Untuk drag file at
 
 ### Dua tangan dan mouse sistem
 
-Backend XTest dan RemoteDesktop yang dipakai aplikasi mengirim tindakan lewat **satu mouse sistem**. Tangan pertama yang memulai gestur menguasainya sampai gestur dilepas. Jika mulai tepat bersamaan, pilihan Prioritas bersamaan menentukan pemilik. Tangan kedua tetap bisa menggerakkan kursor virtualnya, tetapi tidak mengirim klik atau merebut drag. Buka lalu cubit ulang tangan kedua untuk mengambil alih setelah tangan pertama selesai. Tidak ada klik tertunda yang diantrikan.
+Backend XTest, RemoteDesktop dan Windows SendInput mengirim tindakan lewat **satu mouse sistem**. Tangan pertama yang memulai gestur menguasainya sampai gestur dilepas. Jika mulai tepat bersamaan, pilihan Prioritas bersamaan menentukan pemilik. Tangan kedua tetap bisa menggerakkan kursor virtualnya, tetapi tidak mengirim klik atau merebut drag. Buka lalu cubit ulang tangan kedua untuk mengambil alih setelah tangan pertama selesai. Tidak ada klik tertunda yang diantrikan.
 
-Pada Windows dan sesi Qt/X11, tersedia overlay transparan yang melewatkan klik untuk melihat dua kursor di atas desktop. Pada Wayland, overlay global itu tidak diaktifkan: lihat kedua posisi di GUI, sementara pointer sistem mengikuti tangan pemilik. Ini **bukan dua pointer OS yang dapat mengklik dua aplikasi serentak**. Mode zoom dua tangan default mati supaya tidak bertabrakan dengan gerakan dua kursor.
+Pada backend **MouseMux V2**, tangan kanan dan kiri masing-masing punya pointer desktop dan tombol sendiri, sehingga bisa menunjuk, klik, dan drag bersamaan tanpa merebut pointer sistem. Dua pointer desktop digambar oleh MouseMux sendiri; overlay tambahan DeskPilot mati pada mode ini agar tidak menjadi empat. Pindah/resize jendela memakai API Windows per tangan. Mode zoom dua tangan dinonaktifkan khusus backend MouseMux V2: SDK pesan yang dipakai di sini tidak menyediakan perintah scroll pointer. Jika MouseMux ditutup, DeskPilot menghentikan kontrol dan tidak diam-diam kembali ke satu pointer.
+
+Pada Windows SendInput dan sesi Qt/X11, tersedia overlay transparan yang melewatkan klik untuk melihat dua kursor *visual* di atas desktop. Pada Wayland, lihat kedua posisi di GUI, sementara pointer sistem mengikuti tangan pemilik. **Tanpa MouseMux, dua kursor visual bukan dua pointer OS yang dapat mengklik bersamaan.** Mode zoom dua tangan default mati supaya tidak bertabrakan dengan gerakan dua kursor.
 
 ### Gerakan lebih halus dan label tangan
 
@@ -123,7 +127,7 @@ Pada Windows dan sesi Qt/X11, tersedia overlay transparan yang melewatkan klik u
 - Aktivasi cubitan menunggu sekitar 55 ms dan memakai dua ambang jarak untuk menekan/melepas. Pelepasan tangan dan input yang hilang tidak menunggu debounce aktivasi.
 - Pelacakan menggunakan posisi/prediksi telapak, bukan urutan tangan yang dikembalikan model. Label dikunci setelah sedikitnya tiga frame dengan bukti klasifikasi yang cukup.
 - Kalau dua jalur terlalu ambigu (misalnya tangan saling menutupi), input dihentikan dan tangan diakuisisi ulang. Tangan yang terdeteksi kembali harus dibuka sebelum bisa mengontrol lagi.
-- Jika label **konsisten terbalik** karena sumber kamera bercermin, hentikan kamera lalu centang **Tukar label kiri/kanan kamera**. Label yang sudah terlanjur salah saat akuisisi dapat diperbaiki dengan ini atau dengan mengeluarkan tangan dari frame, lalu masuk lagi satu per satu.
+- Pertukaran label **aktif secara default mulai v0.4** karena sumber kamera pengguna melaporkan label kebalik pada tampilan bercermin. Jika masih terbalik, hentikan kamera dan ubah centang **Tukar label kiri/kanan kamera**; kemudian mulai ulang. Pengaturan lama dimigrasikan sekali ke default baru, dan perubahan manual sesudahnya disimpan.
 - Confidence yang ditampilkan merupakan keyakinan label saat akuisisi, bukan jaminan kualitas pose setiap frame. Identitas bisa tetap ambigu pada oklusi, pencahayaan buruk, atau tangan bersilangan; tidak ada klaim akurasi sempurna.
 
 Zoom memakai Ctrl+scroll pada aplikasi yang mendukungnya, bukan pembesaran seluruh layar OS. Pastikan pointer berada di konten yang diinginkan sebelum mengaktifkan zoom. Setelah zoom selesai, buka kedua tangan untuk melanjutkan.
@@ -133,6 +137,7 @@ Zoom memakai Ctrl+scroll pada aplikasi yang mendukungnya, bukan pembesaran selur
 | Lingkungan | Jalur input | Catatan |
 | --- | --- | --- |
 | Windows 10/11 | Win32 `SendInput` + `SetWindowPos` | Pointer, klik, drag, Ctrl+scroll, desktop multi-monitor, pindah/resize jendela target |
+| Windows 10/11 + MouseMux V2 SDK aktif | Win32 registered messages ke MouseMux + `SetWindowPos` | Dua pointer desktop independen, dua klik/drag simultan; zoom dua tangan belum tersedia di mode ini |
 | X11 | python-xlib / XTest | Pointer, klik, Ctrl+scroll; pemetaan absolut mencakup root desktop (gabungan monitor) |
 | GNOME/KDE Wayland dengan RemoteDesktop + ScreenCast portal | D-Bus Notify methods | Memerlukan izin dan metadata ukuran monitor; satu monitor dipilih untuk klik absolut |
 | Wayland tanpa portal RemoteDesktop yang memadai | Preview kamera | GUI menampilkan error jelas; kontrol tidak dianggap aktif |
@@ -163,7 +168,7 @@ Sesi desktop aktual tetap perlu diuji pada perangkat pengguna. Keberadaan kode b
 - `deskpilot/tracking.py`: asosiasi identitas tangan dan filter adaptif.
 - `deskpilot/cursors.py`: peta dua kursor dan overlay transparan X11/Windows.
 - `deskpilot/controller.py`: satu pemilik input, mailbox terbatas, pembatalan dan watchdog.
-- `deskpilot/backends/`: kontrak tindakan, preview, Win32, X11, dan Wayland portal.
+- `deskpilot/backends/`: kontrak tindakan, preview, Win32, MouseMux V2 opsional, X11, dan Wayland portal.
 - `deskpilot/camera.py`: pengunduhan model, capture kamera, dan inferensi dua tangan.
 - `deskpilot/app.py`: GUI, overlay kamera, pengaturan, arbitrasi tombol virtual.
 - `tests/`: tes transisi gestur, kepemilikan input, watchdog, portal mock, dan rendering GUI.
@@ -187,5 +192,6 @@ Lihat [arsitektur](docs/architecture.md) dan [checklist perangkat nyata](docs/ma
 - [XDG ScreenCast portal](https://flatpak.github.io/xdg-desktop-portal/docs/doc-org.freedesktop.portal.ScreenCast.html)
 - [Python Xlib](https://python-xlib.github.io/)
 - [Microsoft SendInput](https://learn.microsoft.com/windows/win32/api/winuser/nf-winuser-sendinput)
+- [MouseMux V2 Windows SDK](https://www.mousemux.com/pages/sdk-windows/)
 
 Lisensi kode: MIT, sesuai LICENSE repo. Model dan dependensi mengikuti lisensi masing-masing.

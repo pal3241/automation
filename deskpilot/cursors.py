@@ -1,4 +1,4 @@
-"""Dual logical cursors: always-visible map, optional click-through X11 overlay."""
+"""Dual logical cursors: always-visible map, optional click-through desktop overlay."""
 
 from PySide6.QtCore import QPointF, Qt
 from PySide6.QtGui import QColor, QFont, QPainter, QPen, QPolygonF

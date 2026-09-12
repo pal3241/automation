@@ -28,6 +28,8 @@ Logical cursors are drawn in the camera view and GUI cursor map. A transparent, 
 
 The Windows backend uses `SendInput` absolute coordinates with `MOUSEEVENTF_VIRTUALDESK`, so the normalized gesture space covers the complete multi-monitor virtual desktop. Keyboard and button ownership still goes through `DesktopBackend`. Window move/resize selects the top-level window below the cursor and applies palm deltas with `SetWindowPos`; maximized/minimized targets fail closed. Win32 loading remains lazy so importing or testing the package on Linux does not access Windows DLLs.
 
+When `Settings.independent` is selected for the MouseMux V2 backend, each hand instead emits tagged actions. The SDK creates two ephemeral virtual users and routes coordinates/button presses via separate registered Win32 messages; per-hand release cannot drop the other hand's drag. Zoom is disabled here (no per-user scroll setter in this transport); window actions use Win32 `SetWindowPos` on separate captured targets. SDK failure never falls back to SendInput. Mode requires a running, configured MouseMux V2 instance and must be validated on Windows hardware.
+
 RemoteDesktop.CreateSession → SelectDevices(keyboard/pointer) → ScreenCast.SelectSources(one monitor) → Start. Requests subscribe before calls, wait cancellably, validate grants and dimensions, and close on failure. Notify input is used without EIS or root. The portal loop is pumped while idle to detect revocation. Window actions emulate the configured Super/Alt + mouse shortcut.
 
 ## Future AI / voice

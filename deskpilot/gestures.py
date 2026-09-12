@@ -50,6 +50,7 @@ class Hand:
 class Action:
     kind: str
     values: tuple = ()
+    side: str | None = None
 
 
 @dataclass
@@ -65,6 +66,7 @@ class Settings:
     dwell_seconds: float = 0.9
     two_hand_zoom: bool = False
     pinky_action: str = "window"
+    independent: bool = False
 
 
 @dataclass
@@ -96,6 +98,8 @@ class GestureEngine:
     def reset_hand(self, side):
         old = self.states[side]
         self.states[side] = HandState(cursor=old.cursor, track_id=old.track_id)
+        if self.settings.independent and old.mode != "idle":
+            return [Action("release", side=side)]
         if self.owner == side:
             self.owner = None
             return [Action("release")]
@@ -163,7 +167,10 @@ class GestureEngine:
                 if state.mode in ("left", "drag") and not state.pinches[12]:
                     desired[side] = "idle"
         zoom = (
-            self.settings.two_hand_zoom and len(desired) == 2 and all(v == "cursor" for v in desired.values())
+            not self.settings.independent
+            and self.settings.two_hand_zoom
+            and len(desired) == 2
+            and all(v == "cursor" for v in desired.values())
         )
         if zoom:
             if self.zoom_anchor is None:
@@ -185,7 +192,9 @@ class GestureEngine:
             state, hand = self.states[side], observed[side]
             wanted, old = desired[side], state.mode
             if wanted == "idle":
-                if self.owner == side:
+                if self.settings.independent and old != "idle":
+                    actions.append(Action("release", side=side))
+                elif self.owner == side:
                     actions.append(Action("release"))
                     self.owner = None
                 state.mode, state.blocked = "idle", False
@@ -203,23 +212,23 @@ class GestureEngine:
                 continue
             entering = old != wanted
             if old == "idle":
-                state.blocked = self.owner is not None and self.owner != side
-                if not state.blocked:
+                state.blocked = not self.settings.independent and self.owner is not None and self.owner != side
+                if not state.blocked and not self.settings.independent:
                     self.owner = side
             state.mode = wanted
-            owns = self.owner == side and not state.blocked
+            owns = (self.settings.independent or self.owner == side) and not state.blocked
             if entering:
                 state.filter = SmoothPoint(self.settings.min_cutoff)
                 state.previous = state.filter.update(palm(hand), now)
                 if owns:
                     if wanted in ("left", "drag") and old not in ("left", "drag"):
-                        actions.append(Action("left_down_at", state.cursor))
+                        actions.append(Action("left_down_at", state.cursor, side if self.settings.independent else None))
                     elif wanted == "right":
-                        actions.append(Action("right_click_at", state.cursor))
+                        actions.append(Action("right_click_at", state.cursor, side if self.settings.independent else None))
                     elif wanted in ("window", "resize"):
-                        actions.append(Action("begin_" + wanted, state.cursor))
+                        actions.append(Action("begin_" + wanted, state.cursor, side if self.settings.independent else None))
                     elif wanted == "cursor":
-                        actions.append(Action("pointer_at", state.cursor))
+                        actions.append(Action("pointer_at", state.cursor, side if self.settings.independent else None))
             if wanted in ("cursor", "drag", "window", "resize"):
                 point = state.filter.update(palm(hand), now)
                 if math.dist(point, state.previous) >= 0.0007:
@@ -227,7 +236,7 @@ class GestureEngine:
                     state.cursor = tuple(max(0, min(1, p + d)) for p, d in zip(state.cursor, delta))
                     state.previous = point
                     if owns:
-                        actions.append(Action("pointer_at", state.cursor))
+                        actions.append(Action("pointer_at", state.cursor, side if self.settings.independent else None))
         self.mode = " / ".join(f"{s}: {v.mode}" for s, v in self.states.items() if v.mode != "idle") or "idle"
         return actions
 

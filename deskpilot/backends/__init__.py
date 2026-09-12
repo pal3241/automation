@@ -22,6 +22,10 @@ def create_backend(choice="auto"):
         from .windows import WindowsBackend
 
         return WindowsBackend()
+    if choice == "mousemux":
+        from .mousemux import MouseMuxBackend
+
+        return MouseMuxBackend()
     if choice == "wayland":
         from .portal import PortalBackend
 

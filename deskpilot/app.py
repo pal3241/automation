@@ -183,7 +183,11 @@ class Window(QMainWindow):
         form.addRow("Kamera", self.camera_id)
         self.backend_choice = QComboBox()
         backends = (
-            (("Otomatis (Windows)", "auto"), ("Windows / SendInput", "windows"))
+            (
+                ("Otomatis (Windows)", "auto"),
+                ("Windows / SendInput (satu pointer)", "windows"),
+                ("MouseMux V2 (dua pointer independen)", "mousemux"),
+            )
             if sys.platform == "win32"
             else (("Otomatis (Linux)", "auto"), ("X11 / XTest", "x11"), ("Wayland / Portal", "wayland"))
         )
@@ -191,6 +195,8 @@ class Window(QMainWindow):
             self.backend_choice.addItem(label, value)
         if args.preview:
             self.backend_choice.setCurrentIndex(self.backend_choice.findData("preview"))
+        elif sys.platform == "win32":
+            self.backend_choice.setCurrentIndex(self.backend_choice.findData("mousemux"))
         form.addRow("Backend", self.backend_choice)
         self.hand = QComboBox()
         self.hand.addItem("Kanan", "Right")
@@ -198,7 +204,8 @@ class Window(QMainWindow):
         self.hand.setCurrentIndex(int(self.preferences.value("hand", 0)))
         form.addRow("Prioritas bersamaan", self.hand)
         self.swap_hands = QCheckBox("Tukar label kiri/kanan kamera")
-        self.swap_hands.setChecked(self.preferences.value("swap", False, type=bool))
+        # Versioned preference: earlier default was reversed on the user's mirrored webcam.
+        self.swap_hands.setChecked(self.preferences.value("swap_v3", True, type=bool))
         form.addRow(self.swap_hands)
         self.modifier = QComboBox()
         self.modifier.addItem("Super", "Super_L")
@@ -227,6 +234,8 @@ class Window(QMainWindow):
         form.addRow("Cubit kelingking", self.pinky)
         self.zoom_mode = QCheckBox("Mode zoom dua tangan")
         form.addRow(self.zoom_mode)
+        self.backend_choice.currentIndexChanged.connect(self.update_backend_options)
+        self.update_backend_options()
         self.overlay_toggle = QCheckBox("Kursor desktop tambahan (X11 / Windows)")
         self.overlay_toggle.setChecked(True)
         form.addRow(self.overlay_toggle)
@@ -270,7 +279,7 @@ class Window(QMainWindow):
             "Lepaskan semua cubitan antar gestur.\n"
             "Arahkan telunjuk ke tombol kamera\n"
             "selama 0,9 detik untuk menekannya.\n\n"
-            "Pindah/resize memakai shortcut WM.\n"
+            "Linux: pindah/resize memakai shortcut WM.\n"
             "Zoom berlaku pada app yang mendukung\nCtrl + scroll."
         )
         label.setWordWrap(True)
@@ -302,6 +311,7 @@ class Window(QMainWindow):
             min_cutoff=self.smoothness.value(),
             two_hand_zoom=self.zoom_mode.isChecked(),
             pinky_action=self.pinky.currentData(),
+            independent=self.backend_choice.currentData() == "mousemux",
         )
         self.controller = Controller(
             self.backend_choice.currentData(),
@@ -311,6 +321,15 @@ class Window(QMainWindow):
         )
         self.controller.start()
         self.dwell = Dwell()
+        self.overlay.hide()
+
+    def update_backend_options(self):
+        independent = self.backend_choice.currentData() == "mousemux"
+        self.zoom_mode.setEnabled(not independent)
+        self.zoom_mode.setToolTip(
+            "MouseMux V2 SDK tidak menyediakan jalur scroll per pointer; gunakan mode satu pointer untuk zoom."
+            if independent else "Dua cubitan telunjuk melakukan Ctrl+scroll di aplikasi yang mendukung."
+        )
 
     def toggle_camera(self):
         if self.camera and self.camera.is_alive():
@@ -415,6 +434,8 @@ class Window(QMainWindow):
             self.zoom_mode,
         ):
             widget.setEnabled(not controller_alive)
+        if self.backend_choice.currentData() == "mousemux":
+            self.zoom_mode.setEnabled(False)
         self.camera_id.setEnabled(not camera_alive)
         self.swap_hands.setEnabled(not camera_alive)
         cursors = dict(self.controller.cursors) if self.controller else {}
@@ -432,7 +453,7 @@ class Window(QMainWindow):
                 )
             )
         )
-        if active and desktop_overlay and self.overlay_toggle.isChecked():
+        if active and desktop_overlay and self.overlay_toggle.isChecked() and self.backend_choice.currentData() != "mousemux":
             self.overlay.setGeometry(QApplication.primaryScreen().virtualGeometry())
             self.overlay.cursors, self.overlay.owner = cursors, owner
             self.overlay.show()
@@ -463,7 +484,7 @@ class Window(QMainWindow):
         self.preferences.setValue("hand", self.hand.currentIndex())
         self.preferences.setValue("gain", self.gain.value())
         self.preferences.setValue("cutoff", self.smoothness.value())
-        self.preferences.setValue("swap", self.swap_hands.isChecked())
+        self.preferences.setValue("swap_v3", self.swap_hands.isChecked())
         if self.camera:
             self.camera.join(timeout=0.5)
         self.overlay.close()
