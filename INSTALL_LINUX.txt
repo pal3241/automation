@@ -1,0 +1,86 @@
+PANDUAN INSTALASI DESKPILOT - LINUX
+==================================
+
+Persyaratan:
+- Linux desktop X11 atau Wayland, webcam, Git, akses internet untuk
+  dependensi dan pengunduhan model pertama.
+- Python 3.12 disarankan; proyek mendukung 3.10-3.13, bukan 3.14.
+- Jangan menjalankan aplikasi sebagai root/sudo. Perintah sudo di bawah
+  hanya untuk memasang paket sistem.
+
+1. Pasang Git dan pustaka sistem yang diperlukan sesuai distro.
+   Pilih SATU dari dua perintah berikut:
+
+   Fedora:
+   sudo dnf install git curl mesa-libGL mesa-libEGL mesa-libGLES portaudio libxcb xcb-util-cursor
+
+   Ubuntu / Debian:
+   sudo apt update
+   sudo apt install git curl python3-venv libgl1 libegl1 libgles2 libportaudio2 libxcb-cursor0
+
+2. Pasang uv untuk memperoleh Python 3.12 tersendiri tanpa mengubah
+   Python sistem. Jika uv sudah ada, cukup jalankan 'uv --version'.
+
+   curl -LsSf https://astral.sh/uv/install.sh | sh
+   source "$HOME/.local/bin/env"
+   uv --version
+
+   Sebelum menjalankan skrip pemasangan dari internet, tinjau petunjuk
+   resmi di https://docs.astral.sh/uv/getting-started/installation/
+
+3. Unduh kode (lewati 'git clone' jika folder automation sudah ada):
+
+   git clone https://github.com/pal3241/automation.git
+   cd automation
+
+4. Buat lingkungan Python 3.12 dan instal proyek:
+
+   uv python install 3.12
+   uv venv --python 3.12 .venv312
+   uv pip install --python .venv312/bin/python -e .
+
+5. Uji tanpa mengirim tindakan ke desktop dahulu:
+
+   .venv312/bin/python -m deskpilot --preview
+
+   Untuk memakai backend desktop:
+
+   .venv312/bin/python -m deskpilot
+
+6. Isi ID kamera pada GUI (misalnya 0 atau 0,1), klik Mulai kamera,
+   Hubungkan desktop, kemudian Aktifkan kontrol. Model Hand Landmarker
+   diunduh satu kali saat kamera pertama dimulai dan disimpan di cache.
+
+Wayland:
+- Pastikan xdg-desktop-portal dan backend yang cocok dengan desktop
+  tersedia (misalnya GNOME atau KDE).
+- Izinkan akses keyboard/pointer dan pilih satu monitor penuh saat
+  dialog RemoteDesktop muncul. Jika portal tidak mendukung fitur yang
+  dibutuhkan, gunakan Preview; input desktop tidak bisa diaktifkan.
+- Perpindahan/resize jendela memakai modifier Super/Alt + drag sesuai
+  shortcut pengelola jendela, yang bisa diubah di GUI. X11 dan Wayland
+  memiliki backend berbeda; lihat tabel kompatibilitas di README.md.
+
+Memperbarui instalasi dari dalam direktori automation:
+
+   git pull --ff-only
+   uv pip install --python .venv312/bin/python -e .
+   .venv312/bin/python -m deskpilot
+
+Jika bermasalah:
+- "Python 3.14 not in '<3.14,>=3.10'": pastikan langkah 4 memakai uv
+  Python 3.12; jangan hapus batas versi proyek.
+- "No module named 'PySide6'": pastikan instalasi langkah 4 berhasil;
+  jalankan .venv312/bin/python, bukan python sistem.
+- 'uv: command not found': buka terminal baru atau muat ulang
+  source "$HOME/.local/bin/env"; cek petunjuk uv jika lokasi berubah.
+- Kamera gagal dibuka: tutup aplikasi lain yang memakai kamera, periksa
+  izin perangkat, lalu coba nomor kamera lain di GUI.
+- Tidak muncul dialog Wayland: periksa layanan xdg-desktop-portal dan
+  backend desktop yang terpasang; uji Preview untuk memisahkan masalah
+  kamera dari masalah izin input desktop.
+- Satu tangan tidak terdeteksi/label tertukar: atur pencahayaan dan opsi
+  "Tukar label kiri/kanan kamera" sebelum memulai ulang kamera.
+
+Info fitur, gestur, dan keterbatasan: README.md
+Referensi uv Python: https://docs.astral.sh/uv/guides/install-python/

@@ -8,6 +8,8 @@ Fondasi Python untuk mengontrol desktop dengan kamera dan gestur tangan. GUI men
 
 Python **3.10–3.13** dan webcam diperlukan. Python 3.12 disarankan. Pada Linux jangan menjalankan aplikasi sebagai root.
 
+Panduan langkah demi langkah terpisah: [Windows](INSTALL_WINDOWS.txt) dan [Linux](INSTALL_LINUX.txt).
+
 ### Windows 10/11
 
 Pasang Python 3.12 64-bit dan Git. Di PowerShell:

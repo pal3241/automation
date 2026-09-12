@@ -1,0 +1,71 @@
+PANDUAN INSTALASI DESKPILOT - WINDOWS
+====================================
+
+Persyaratan:
+- Windows 10 atau 11, webcam, koneksi internet saat instalasi/unduh model pertama.
+- Git dan Python 3.12 64-bit. Proyek mendukung Python 3.10-3.13;
+  Python 3.14 tidak didukung (lihat requires-python di pyproject.toml).
+- Jalankan perintah berikut di PowerShell biasa, bukan sebagai Administrator.
+
+1. Instal Git dan Python 3.12 dari situs resminya jika belum ada.
+   Pastikan perintah berikut berhasil:
+
+   git --version
+   py -3.12 --version
+
+2. Unduh kode (lewati 'git clone' jika folder automation sudah ada),
+   lalu masuk ke direktori proyek:
+
+   git clone https://github.com/pal3241/automation.git
+   cd automation
+
+3. Buat lingkungan Python khusus dan pasang dependensi:
+
+   py -3.12 -m venv .venv
+   .\.venv\Scripts\python.exe -m pip install --upgrade pip
+   .\.venv\Scripts\python.exe -m pip install -e .
+
+4. Uji kamera/gestur tanpa mengendalikan desktop terlebih dahulu:
+
+   .\.venv\Scripts\python.exe -m deskpilot --preview
+
+   Setelah yakin, tutup aplikasi dan jalankan mode normal:
+
+   .\.venv\Scripts\python.exe -m deskpilot
+
+5. Di GUI, isi ID kamera (contoh 0 atau 0,1 untuk dua kamera), pilih
+   Mulai kamera, lalu Hubungkan desktop dan Aktifkan kontrol. Pada start
+   kamera pertama, model Hand Landmarker diunduh dan disimpan di cache;
+   tunggu sampai selesai. Pengaturan kamera tambahan ada di GUI.
+
+Pilihan input Windows:
+- Default: MouseMux V2 untuk dua pointer desktop independen. MouseMux V2
+  harus diinstal terpisah, Windows SDK-nya diaktifkan, dan mode Multiplex
+  dijalankan. Cek syarat lisensi/SDK MouseMux sebelum memakai opsi ini:
+  https://www.mousemux.com/pages/sdk-windows/
+- Tanpa MouseMux, pilih backend "Windows / SendInput (satu pointer)" pada GUI.
+  Kedua tangan tetap dapat dilacak, tetapi berbagi satu pointer sistem;
+  tidak bisa mengklik dua lokasi secara bersamaan.
+- Untuk uji tanpa input OS, pilih Preview atau jalankan --preview.
+
+Memperbarui instalasi dari dalam direktori automation:
+
+   git pull --ff-only
+   .\.venv\Scripts\python.exe -m pip install -e .
+   .\.venv\Scripts\python.exe -m deskpilot
+
+Jika bermasalah:
+- "requires a different Python: 3.14": ulangi langkah 3 memakai py -3.12.
+  Jangan instal menggunakan Python sistem 3.14 atau hapus batas versi proyek.
+- "No module named PySide6": pastikan langkah pip install -e . selesai,
+  lalu selalu jalankan .\.venv\Scripts\python.exe, bukan python sistem.
+- 'py -3.12' tidak ditemukan: instal Python 3.12 beserta Python Launcher,
+  buka PowerShell baru, lalu cek lagi py -3.12 --version.
+- Kamera tidak tersedia: tutup aplikasi lain yang sedang memakai webcam,
+  periksa izin Camera di Windows, dan coba ID kamera lain (misalnya 1).
+- MouseMux tidak tersambung: ikuti instruksi SDK MouseMux atau pilih SendInput.
+- Kontrol jendela aplikasi yang dijalankan sebagai Administrator dapat ditolak
+  oleh Windows; uji dulu pada aplikasi biasa.
+
+Info fitur, gestur, dan keterbatasan: README.md
+Referensi lingkungan Python: https://docs.python.org/3.12/library/venv.html
